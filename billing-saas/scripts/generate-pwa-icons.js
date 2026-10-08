@@ -1,0 +1,164 @@
+const fs = require('fs');
+const path = require('path');
+const sharp = require('sharp');
+
+const publicDir = path.join(__dirname, '..', 'public');
+const iconsDir = path.join(publicDir, 'icons');
+
+if (!fs.existsSync(iconsDir)) {
+  fs.mkdirSync(iconsDir, { recursive: true });
+}
+
+// 1. Beautiful master SVG for BillingSaaS
+const standardSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3B82F6"/>
+      <stop offset="100%" stop-color="#1D4ED8"/>
+    </linearGradient>
+    <linearGradient id="sheetGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="100%" stop-color="#F1F5F9"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="16" stdDeviation="20" flood-color="#0f172a" flood-opacity="0.35"/>
+    </filter>
+    <filter id="subtle" x="-5%" y="-5%" width="110%" height="110%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000000" flood-opacity="0.15"/>
+    </filter>
+  </defs>
+
+  <!-- Background rounded squircle -->
+  <rect width="512" height="512" rx="115" fill="url(#bgGrad)"/>
+  
+  <!-- Subtle pattern / accent rings -->
+  <circle cx="430" cy="80" r="140" fill="#60A5FA" opacity="0.15"/>
+  <circle cx="80" cy="450" r="100" fill="#1E40AF" opacity="0.25"/>
+
+  <!-- Main Invoice Sheet -->
+  <g filter="url(#shadow)">
+    <!-- Invoice Paper shape with zigzag bottom -->
+    <path d="M 140 100 
+             L 372 100 
+             Q 384 100 384 112 
+             L 384 390 
+             L 360 376 L 336 390 L 312 376 L 288 390 L 264 376 L 240 390 L 216 376 L 192 390 L 168 376 L 144 390 L 128 380
+             L 128 112 
+             Q 128 100 140 100 Z" 
+          fill="url(#sheetGrad)"/>
+          
+    <!-- Decorative top colored bar on receipt -->
+    <path d="M 128 112 Q 128 100 140 100 L 372 100 Q 384 100 384 112 L 384 126 L 128 126 Z" fill="#2563EB"/>
+    
+    <!-- Receipt Lines -->
+    <rect x="160" y="152" width="130" height="12" rx="6" fill="#94A3B8"/>
+    <rect x="310" y="152" width="42" height="12" rx="6" fill="#CBD5E1"/>
+
+    <rect x="160" y="180" width="100" height="10" rx="5" fill="#CBD5E1"/>
+    <rect x="310" y="180" width="42" height="10" rx="5" fill="#CBD5E1"/>
+
+    <line x1="156" y1="212" x2="356" y2="212" stroke="#E2E8F0" stroke-width="3" stroke-dasharray="6 4"/>
+
+    <!-- Prominent Indian Rupee symbol & amount highlight -->
+    <g transform="translate(160, 240)">
+      <!-- Rupee badge circle -->
+      <circle cx="36" cy="36" r="32" fill="#EFF6FF" stroke="#3B82F6" stroke-width="3"/>
+      <!-- Rupee symbol path -->
+      <text x="36" y="47" font-family="Arial, -apple-system, sans-serif" font-weight="900" font-size="34" fill="#1D4ED8" text-anchor="middle">₹</text>
+    </g>
+
+    <!-- Total amount mock lines -->
+    <rect x="246" y="258" width="106" height="14" rx="7" fill="#1E293B"/>
+    <rect x="266" y="286" width="86" height="10" rx="5" fill="#10B981"/>
+
+    <rect x="160" y="330" width="192" height="8" rx="4" fill="#E2E8F0"/>
+  </g>
+
+  <!-- Floating Green Fast/Success Badge -->
+  <g transform="translate(340, 310)" filter="url(#subtle)">
+    <circle cx="36" cy="36" r="32" fill="#10B981" stroke="#FFFFFF" stroke-width="4"/>
+    <!-- Lightning or Checkmark -->
+    <path d="M 38 20 L 26 38 L 35 38 L 33 52 L 48 34 L 39 34 Z" fill="#FFFFFF"/>
+  </g>
+</svg>`;
+
+// 2. Maskable version has safe padding (centered within 80% circle)
+const maskableSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGradM" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3B82F6"/>
+      <stop offset="100%" stop-color="#1D4ED8"/>
+    </linearGradient>
+    <linearGradient id="sheetGradM" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="100%" stop-color="#F1F5F9"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Full square background for maskable -->
+  <rect width="512" height="512" fill="url(#bgGradM)"/>
+  <circle cx="430" cy="80" r="140" fill="#60A5FA" opacity="0.15"/>
+  <circle cx="80" cy="450" r="100" fill="#1E40AF" opacity="0.25"/>
+
+  <!-- Scaled down 75% for inner safe-zone -->
+  <g transform="translate(64, 64) scale(0.75)">
+    <path d="M 140 100 
+             L 372 100 
+             Q 384 100 384 112 
+             L 384 390 
+             L 360 376 L 336 390 L 312 376 L 288 390 L 264 376 L 240 390 L 216 376 L 192 390 L 168 376 L 144 390 L 128 380
+             L 128 112 
+             Q 128 100 140 100 Z" 
+          fill="url(#sheetGradM)"/>
+    <path d="M 128 112 Q 128 100 140 100 L 372 100 Q 384 100 384 112 L 384 126 L 128 126 Z" fill="#2563EB"/>
+    <rect x="160" y="152" width="130" height="12" rx="6" fill="#94A3B8"/>
+    <rect x="310" y="152" width="42" height="12" rx="6" fill="#CBD5E1"/>
+    <rect x="160" y="180" width="100" height="10" rx="5" fill="#CBD5E1"/>
+    <rect x="310" y="180" width="42" height="10" rx="5" fill="#CBD5E1"/>
+    <line x1="156" y1="212" x2="356" y2="212" stroke="#E2E8F0" stroke-width="3" stroke-dasharray="6 4"/>
+    <g transform="translate(160, 240)">
+      <circle cx="36" cy="36" r="32" fill="#EFF6FF" stroke="#3B82F6" stroke-width="3"/>
+      <text x="36" y="47" font-family="Arial, -apple-system, sans-serif" font-weight="900" font-size="34" fill="#1D4ED8" text-anchor="middle">₹</text>
+    </g>
+    <rect x="246" y="258" width="106" height="14" rx="7" fill="#1E293B"/>
+    <rect x="266" y="286" width="86" height="10" rx="5" fill="#10B981"/>
+    <rect x="160" y="330" width="192" height="8" rx="4" fill="#E2E8F0"/>
+    <g transform="translate(340, 310)">
+      <circle cx="36" cy="36" r="32" fill="#10B981" stroke="#FFFFFF" stroke-width="4"/>
+      <path d="M 38 20 L 26 38 L 35 38 L 33 52 L 48 34 L 39 34 Z" fill="#FFFFFF"/>
+    </g>
+  </g>
+</svg>`;
+
+async function generateIcons() {
+  const stdBuf = Buffer.from(standardSvg);
+  const maskBuf = Buffer.from(maskableSvg);
+
+  // Save base SVG
+  fs.writeFileSync(path.join(publicDir, 'icon.svg'), standardSvg);
+  fs.writeFileSync(path.join(iconsDir, 'icon-512.svg'), standardSvg);
+
+  // 512x512
+  await sharp(stdBuf).resize(512, 512).png().toFile(path.join(iconsDir, 'icon-512x512.png'));
+  // 192x192
+  await sharp(stdBuf).resize(192, 192).png().toFile(path.join(iconsDir, 'icon-192x192.png'));
+  // 180x180 (Apple touch icon)
+  await sharp(stdBuf).resize(180, 180).png().toFile(path.join(iconsDir, 'apple-touch-icon.png'));
+  await sharp(stdBuf).resize(180, 180).png().toFile(path.join(publicDir, 'apple-touch-icon.png'));
+
+  // Maskable icons
+  await sharp(maskBuf).resize(512, 512).png().toFile(path.join(iconsDir, 'icon-maskable-512x512.png'));
+  await sharp(maskBuf).resize(192, 192).png().toFile(path.join(iconsDir, 'icon-maskable-192x192.png'));
+
+  // Favicons
+  await sharp(stdBuf).resize(32, 32).png().toFile(path.join(iconsDir, 'favicon-32x32.png'));
+  await sharp(stdBuf).resize(16, 16).png().toFile(path.join(iconsDir, 'favicon-16x16.png'));
+  await sharp(stdBuf).resize(32, 32).png().toFile(path.join(publicDir, 'favicon.ico'));
+
+  console.log('PWA icons successfully generated in public/icons/');
+}
+
+generateIcons().catch(err => {
+  console.error('Error generating icons:', err);
+  process.exit(1);
+});

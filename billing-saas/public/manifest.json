@@ -1,0 +1,84 @@
+{
+  "name": "BillingSaaS - Indian Shop Billing & Invoicing",
+  "short_name": "BillingSaaS",
+  "description": "Multi-tenant offline-ready billing and inventory software tailored for 30+ types of Indian retail & service businesses.",
+  "start_url": "/dashboard",
+  "id": "/dashboard",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+  "orientation": "portrait-primary",
+  "background_color": "#ffffff",
+  "theme_color": "#2563eb",
+  "lang": "en-IN",
+  "dir": "ltr",
+  "categories": ["business", "finance", "productivity", "utilities"],
+  "icons": [
+    {
+      "src": "/icons/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-maskable-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icons/icon-maskable-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Create New Bill",
+      "short_name": "New Bill",
+      "description": "Fast offline-ready billing for your counter",
+      "url": "/billing/new",
+      "icons": [
+        {
+          "src": "/icons/icon-192x192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "Invoices History",
+      "short_name": "Invoices",
+      "description": "View previous bills and payments",
+      "url": "/invoices",
+      "icons": [
+        {
+          "src": "/icons/icon-192x192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "Manage Products",
+      "short_name": "Products",
+      "description": "Inventory list and stock pricing",
+      "url": "/products",
+      "icons": [
+        {
+          "src": "/icons/icon-192x192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    }
+  ],
+  "prefer_related_applications": false
+}
