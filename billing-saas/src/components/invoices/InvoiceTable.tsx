@@ -101,7 +101,41 @@ export function InvoiceTable({
   const [deletingInvoice, setDeletingInvoice] =
     useState<SerializedInvoice | null>(null);
   const [isCancelling, setIsCancelling] = useState(false);
+  const [markingPaidId, setMarkingPaidId] = useState<string | null>(null);
   const { pendingCount, isSyncing, syncNow, isOnline } = useOfflineSync();
+
+  async function handleMarkAsPaid(inv: SerializedInvoice) {
+    setMarkingPaidId(inv.id);
+    try {
+      const res = await fetch(`/api/invoices/${inv.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: InvoiceStatus.PAID }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Failed to mark invoice as paid");
+      }
+      toast.success(`Invoice #${inv.invoiceNo} marked as PAID`);
+      setInvoices((prev) =>
+        prev.map((item) =>
+          item.id === inv.id
+            ? {
+                ...item,
+                status: InvoiceStatus.PAID,
+                paidAmount: item.totalAmount,
+                balanceAmount: 0,
+              }
+            : item
+        )
+      );
+      router.refresh();
+    } catch (err: any) {
+      toast.error(err.message || "Could not mark as paid");
+    } finally {
+      setMarkingPaidId(null);
+    }
+  }
 
   // Sync state if server data refreshes
   React.useEffect(() => {
@@ -280,7 +314,7 @@ export function InvoiceTable({
       </div>
 
       {/* INVOICES TABLE */}
-      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm overflow-x-auto">
         <Table>
           <TableHeader className="bg-slate-50/75 border-b border-slate-200">
             <TableRow>
@@ -399,16 +433,30 @@ export function InvoiceTable({
 
                     {/* Actions */}
                     <TableCell className="text-right">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-8 w-8 p-0 text-slate-500 hover:text-slate-900"
-                          >
-                            <MoreVertical className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
+                      <div className="flex items-center justify-end gap-1.5">
+                        {inv.status !== InvoiceStatus.PAID &&
+                          inv.status !== InvoiceStatus.CANCELLED && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={markingPaidId === inv.id}
+                              onClick={() => handleMarkAsPaid(inv)}
+                              className="h-7 px-2 text-[11px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border-emerald-200"
+                            >
+                              {markingPaidId === inv.id ? "Saving..." : "Mark Paid"}
+                            </Button>
+                          )}
+
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 w-8 p-0 text-slate-500 hover:text-slate-900"
+                            >
+                              <MoreVertical className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-40">
                           <DropdownMenuItem asChild className="text-xs cursor-pointer">
                             <Link href={`/invoices/${inv.id}`}>
@@ -447,7 +495,8 @@ export function InvoiceTable({
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
-                    </TableCell>
+                    </div>
+                  </TableCell>
                   </TableRow>
                 );
               })

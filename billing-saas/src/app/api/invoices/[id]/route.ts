@@ -118,6 +118,20 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
       if (data.status === InvoiceStatus.PAID) {
         updateData.paidAmount = existing.totalAmount;
         updateData.balanceAmount = 0;
+
+        if (existing.customerId && Number(existing.balanceAmount) > 0) {
+          try {
+            await prisma.customer.update({
+              where: { id: existing.customerId },
+              data: {
+                creditBalance: { decrement: existing.balanceAmount },
+                totalPaid: { increment: existing.balanceAmount },
+              },
+            });
+          } catch (e) {
+            console.warn("Could not decrement customer credit balance:", e);
+          }
+        }
       }
     }
 
@@ -173,18 +187,39 @@ export async function DELETE(req: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
     }
 
-    // Role check: Only OWNER can permanently delete
+    // Role check: Only OWNER can permanently delete, unless verified via Admin Delete Password
     const session = await auth();
     const userRole = session?.user?.role;
 
-    if (isPermanent) {
-      if (userRole !== "OWNER") {
+    // Check Tenant Settings for Delete Password
+    const tenantSetting = await prisma.setting.findUnique({
+      where: { tenantId: tenant.id },
+    });
+
+    const configuredPassword = tenantSetting?.deletePassword?.trim();
+    const reqPassword = (
+      req.headers.get("x-delete-password") ||
+      searchParams.get("password") ||
+      ""
+    ).trim();
+
+    if (configuredPassword && configuredPassword.length > 0) {
+      if (!reqPassword || reqPassword !== configuredPassword) {
         return NextResponse.json(
-          { error: "Forbidden: Only shop owners can permanently delete invoices" },
+          { error: "Incorrect password. Cannot delete bill." },
           { status: 403 }
         );
       }
+    } else if (isPermanent) {
+      if (userRole && userRole !== "OWNER") {
+        return NextResponse.json(
+          { error: "Forbidden: Only shop owners can delete invoices or set a Delete Password in Settings" },
+          { status: 403 }
+        );
+      }
+    }
 
+    if (isPermanent) {
       // Hard Delete in an atomic Prisma transaction
       await prisma.$transaction(async (tx) => {
         // a. Restore product stock (only if not already cancelled)
@@ -216,11 +251,17 @@ export async function DELETE(req: NextRequest, { params }: RouteParams) {
               const currentSpent = Number(customer.totalSpent);
               const newTotalSpent = Math.max(0, currentSpent - invoiceAmount);
 
+              // Deduct unpaid balance from creditBalance if bill had udhari
+              const currentCredit = Number(customer.creditBalance || 0);
+              const unpaidBalance = Number(existing.balanceAmount || 0);
+              const newCredit = Math.max(0, currentCredit - unpaidBalance);
+
               await tx.customer.update({
                 where: { id: customer.id },
                 data: {
                   totalBills: newTotalBills,
                   totalSpent: newTotalSpent,
+                  creditBalance: newCredit,
                 },
               });
             }
@@ -242,7 +283,7 @@ export async function DELETE(req: NextRequest, { params }: RouteParams) {
 
       return NextResponse.json({
         success: true,
-        message: `Invoice ${existing.invoiceNo} permanently deleted`,
+        message: "Bill deleted successfully",
       });
     }
 

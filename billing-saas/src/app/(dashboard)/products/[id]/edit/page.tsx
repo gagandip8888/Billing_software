@@ -13,6 +13,8 @@ interface EditProductPageProps {
   };
 }
 
+export const dynamic = "force-dynamic";
+
 export default async function EditProductPage({ params }: EditProductPageProps) {
   const tenant = await requireTenant();
   const { id } = params;

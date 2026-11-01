@@ -103,14 +103,20 @@ model Tenant {
   plan         Plan      @default(FREE)
   planExpiry   DateTime?
   isActive     Boolean   @default(true)
+  nextProductNo Int      @default(1001)
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
-  users     User[]
-  customers Customer[]
-  products  Product[]
-  invoices  Invoice[]
-  settings  Setting?
+  users           User[]
+  customers       Customer[]
+  products        Product[]
+  invoices        Invoice[]
+  settings        Setting?
+  holdBills       HoldBill[]
+  paymentReceipts PaymentReceipt[]
+  creditNotes     CreditNote[]
+  salesReturns    SalesReturn[]
+  expenses        Expense[]
 
   @@index([shopType])
   @@index([plan])
@@ -137,23 +143,29 @@ model User {
 }
 
 model Customer {
-  id          String    @id @default(cuid())
-  tenantId    String
-  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  name        String
-  mobile      String
-  email       String?
-  address     String?
-  gstNo       String?
-  notes       String?
-  totalBills  Int       @default(0)
-  totalSpent  Decimal   @default(0) @db.Decimal(12, 2)
-  lastVisitAt DateTime?
-  isActive    Boolean   @default(true)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id            String    @id @default(cuid())
+  tenantId      String
+  tenant        Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name          String
+  mobile        String
+  email         String?
+  address       String?
+  gstNo         String?
+  notes         String?
+  totalBills    Int       @default(0)
+  totalSpent    Decimal   @default(0) @db.Decimal(12, 2)
+  creditBalance Decimal   @default(0) @db.Decimal(12, 2)
+  totalPaid     Decimal   @default(0) @db.Decimal(12, 2)
+  firstVisitAt  DateTime  @default(now())
+  lastVisitAt   DateTime? @default(now())
+  totalInvoices Int       @default(0)
+  autoDeletedAt DateTime?
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
-  invoices Invoice[]
+  invoices        Invoice[]
+  paymentReceipts PaymentReceipt[]
 
   @@index([tenantId, mobile])
   @@index([tenantId, name])
@@ -161,30 +173,37 @@ model Customer {
 }
 
 model Product {
-  id            String   @id @default(cuid())
-  tenantId      String
-  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  name          String
-  description   String?
-  category      String?
-  price         Decimal  @db.Decimal(10, 2)
-  costPrice     Decimal? @db.Decimal(10, 2)
-  taxRate       Decimal  @default(18) @db.Decimal(5, 2)
-  hsnCode       String?
-  unit          String   @default("pc")
-  stockQty      Decimal? @db.Decimal(10, 3)
-  lowStockAlert Decimal? @db.Decimal(10, 3)
-  barcode       String?
-  metadata      Json?
-  isActive      Boolean  @default(true)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id             String   @id @default(cuid())
+  productId      String   @unique
+  tenantId       String
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name           String
+  description    String?
+  category       String?
+  size           String?
+  color          String?
+  brand          String?
+  mrp            Decimal? @db.Decimal(10, 2)
+  variantGroupId String?
+  price          Decimal  @db.Decimal(10, 2)
+  costPrice      Decimal? @db.Decimal(10, 2)
+  taxRate        Decimal  @default(18) @db.Decimal(5, 2)
+  hsnCode        String?
+  unit           String   @default("pc")
+  stockQty       Decimal? @db.Decimal(10, 3)
+  lowStockAlert  Decimal? @db.Decimal(10, 3)
+  barcode        String?
+  metadata       Json?
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   invoiceItems InvoiceItem[]
 
   @@index([tenantId, isActive])
   @@index([tenantId, category])
   @@index([tenantId, barcode])
+  @@index([tenantId, variantGroupId])
   @@map("products")
 }
 
@@ -204,13 +223,16 @@ model Invoice {
   paidAmount     Decimal       @default(0) @db.Decimal(12, 2)
   balanceAmount  Decimal       @db.Decimal(12, 2)
   paymentMode    PaymentMode   @default(CASH)
+  payments       Json?
   status         InvoiceStatus @default(PAID)
   notes          String?
   metadata       Json?
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
 
-  items InvoiceItem[]
+  items        InvoiceItem[]
+  creditNotes  CreditNote[]
+  salesReturns SalesReturn[]
 
   @@unique([tenantId, invoiceNo])
   @@index([tenantId, invoiceDate])
@@ -220,18 +242,24 @@ model Invoice {
 }
 
 model InvoiceItem {
-  id        String   @id @default(cuid())
-  invoiceId String
-  invoice   Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
-  productId String?
-  product   Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
-  name      String
-  qty       Decimal  @db.Decimal(10, 3)
-  price     Decimal  @db.Decimal(10, 2)
-  taxRate   Decimal  @db.Decimal(5, 2)
-  taxAmount Decimal  @db.Decimal(10, 2)
-  total     Decimal  @db.Decimal(12, 2)
-  metadata  Json?
+  id           String   @id @default(cuid())
+  invoiceId    String
+  invoice      Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  productId    String?
+  product      Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  name         String
+  size         String?
+  color        String?
+  brand        String?
+  mrp          Decimal? @db.Decimal(10, 2)
+  qty          Decimal  @db.Decimal(10, 3)
+  price        Decimal  @db.Decimal(10, 2)
+  itemDiscount Decimal? @default(0) @db.Decimal(10, 2)
+  discountType String?  @default("amount")
+  taxRate      Decimal  @db.Decimal(5, 2)
+  taxAmount    Decimal  @db.Decimal(10, 2)
+  total        Decimal  @db.Decimal(12, 2)
+  metadata     Json?
 
   @@index([invoiceId])
   @@map("invoice_items")
@@ -249,9 +277,12 @@ model Setting {
   whatsappEnabled Boolean  @default(false)
   whatsappNumber  String?
   upiId           String?
+  preferredApp    String?
   bankName        String?
   bankAccount     String?
   bankIfsc        String?
+  language        String   @default("en")
+  deletePassword  String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -276,4 +307,124 @@ model Subscription {
   updatedAt       DateTime  @updatedAt
 
   @@map("subscriptions")
+}
+
+// ==========================================
+// HOLD BILLS (POS hold & resume)
+// ==========================================
+
+model HoldBill {
+  id             String   @id @default(cuid())
+  tenantId       String
+  cashierId      String?
+  customerName   String?
+  customerMobile String?
+  payload        Json
+  note           String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, createdAt])
+  @@map("hold_bills")
+}
+
+// ==========================================
+// UDHARI / CUSTOMER PAYMENT RECEIPTS
+// ==========================================
+
+model PaymentReceipt {
+  id          String      @id @default(cuid())
+  tenantId    String
+  customerId  String
+  amount      Decimal     @db.Decimal(12, 2)
+  paymentMode PaymentMode
+  reference   String?
+  note        String?
+  receivedAt  DateTime    @default(now())
+  createdById String?
+  createdAt   DateTime    @default(now())
+
+  tenant      Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer    Customer    @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, customerId])
+  @@index([tenantId, receivedAt])
+  @@map("payment_receipts")
+}
+
+// ==========================================
+// RETURNS & CREDIT NOTES
+// ==========================================
+
+model CreditNote {
+  id              String    @id @default(cuid())
+  tenantId        String
+  invoiceId       String?
+  creditNoteNo    String
+  amount          Decimal   @db.Decimal(12, 2)
+  reason          String
+  status          String    @default("OPEN")
+  usedInInvoiceId String?
+  expiresAt       DateTime?
+  createdAt       DateTime  @default(now())
+
+  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  invoice         Invoice?  @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, creditNoteNo])
+  @@index([tenantId, status])
+  @@map("credit_notes")
+}
+
+model SalesReturn {
+  id           String            @id @default(cuid())
+  tenantId     String
+  invoiceId    String
+  returnNo     String
+  returnDate   DateTime          @default(now())
+  totalAmount  Decimal           @db.Decimal(12, 2)
+  refundMode   String
+  reason       String?
+  productId    String?
+  productName  String?
+  creditNoteId String?
+  createdAt    DateTime          @default(now())
+
+  tenant       Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  invoice      Invoice           @relation(fields: [invoiceId], references: [id])
+  items        SalesReturnItem[]
+
+  @@unique([tenantId, returnNo])
+  @@map("sales_returns")
+}
+
+model SalesReturnItem {
+  id        String      @id @default(cuid())
+  returnId  String
+  productId String?
+  name      String
+  qty       Decimal     @db.Decimal(10, 3)
+  price     Decimal     @db.Decimal(10, 2)
+  total     Decimal     @db.Decimal(12, 2)
+
+  salesReturn SalesReturn @relation(fields: [returnId], references: [id], onDelete: Cascade)
+
+  @@map("sales_return_items")
+}
+
+model Expense {
+  id        String   @id @default(cuid())
+  tenantId  String
+  title     String
+  amount    Decimal  @db.Decimal(12, 2)
+  date      DateTime @default(now())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, date])
+  @@map("expenses")
 }

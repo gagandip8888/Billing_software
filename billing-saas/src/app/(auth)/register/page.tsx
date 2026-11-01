@@ -93,7 +93,7 @@ export default function RegisterPage() {
         toast.info("Account created. Please log in with your credentials.");
         router.push("/login");
       } else {
-        router.push("/dashboard");
+        router.push("/billing/new");
         router.refresh();
       }
     } catch (err: any) {

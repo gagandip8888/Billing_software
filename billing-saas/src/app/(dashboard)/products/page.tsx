@@ -1,11 +1,13 @@
+import React, { Suspense } from "react";
 import { requireTenant } from "@/lib/tenant";
 import { prisma } from "@/lib/prisma";
 import { ProductsView } from "@/components/products/ProductsView";
 import { serializeProduct } from "@/lib/products";
+import ProductsLoading from "./loading";
 
 export const dynamic = "force-dynamic";
 
-export default async function ProductsPage() {
+async function ProductsContent() {
   const tenant = await requireTenant();
 
   const products = await prisma.product.findMany({
@@ -26,5 +28,13 @@ export default async function ProductsPage() {
       shopType={tenant.shopType}
       businessName={tenant.businessName}
     />
+  );
+}
+
+export default function ProductsPage() {
+  return (
+    <Suspense fallback={<ProductsLoading />}>
+      <ProductsContent />
+    </Suspense>
   );
 }

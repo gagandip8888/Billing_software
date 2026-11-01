@@ -71,6 +71,11 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
     if (data.name !== undefined) updateData.name = data.name;
     if (data.description !== undefined) updateData.description = data.description ?? null;
     if (data.category !== undefined) updateData.category = data.category ?? null;
+    if (data.size !== undefined) updateData.size = data.size ?? null;
+    if (data.color !== undefined) updateData.color = data.color ?? null;
+    if (data.brand !== undefined) updateData.brand = data.brand ?? null;
+    if (data.mrp !== undefined) updateData.mrp = data.mrp ?? null;
+    if (data.variantGroupId !== undefined) updateData.variantGroupId = data.variantGroupId ?? null;
     if (data.price !== undefined) updateData.price = data.price;
     if (data.costPrice !== undefined) updateData.costPrice = data.costPrice ?? null;
     if (data.taxRate !== undefined) updateData.taxRate = data.taxRate;

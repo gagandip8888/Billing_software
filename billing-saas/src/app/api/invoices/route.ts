@@ -54,26 +54,25 @@ export async function GET(req: NextRequest) {
       ];
     }
 
-    const [invoices, total] = await Promise.all([
-      prisma.invoice.findMany({
-        where,
-        include: {
-          customer: {
-            select: {
-              id: true,
-              name: true,
-              mobile: true,
-              email: true,
-            },
+    // Execute queries sequentially for PgBouncer connection stability
+    const invoices = await prisma.invoice.findMany({
+      where,
+      include: {
+        customer: {
+          select: {
+            id: true,
+            name: true,
+            mobile: true,
+            email: true,
           },
-          items: true,
         },
-        orderBy: { invoiceDate: "desc" },
-        skip,
-        take: limit,
-      }),
-      prisma.invoice.count({ where }),
-    ]);
+        items: true,
+      },
+      orderBy: { invoiceDate: "desc" },
+      skip,
+      take: limit,
+    });
+    const total = await prisma.invoice.count({ where });
 
     const totalPages = Math.ceil(total / limit) || 1;
 
@@ -89,7 +88,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
     return NextResponse.json(
-      { error: "Failed to fetch invoices" },
+      { error: "Failed to fetch invoices", details: error?.message || String(error) },
       { status: 500 }
     );
   }
@@ -125,12 +124,20 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Server-side calculation of line taxes, subtotal, discount and totals
+    // Server-side calculation of line taxes, subtotal, discount, item discounts, and totals
     const totals = calculateInvoiceTotals(
       data.items,
       data.discountAmount,
-      data.amountPaid
+      data.amountPaid,
+      data.creditNoteAmount || 0
     );
+
+    const paymentRecords =
+      data.payments && data.payments.length > 0
+        ? data.payments
+        : totals.paidAmount > 0
+        ? [{ mode: data.paymentMode, amount: totals.paidAmount }]
+        : [];
 
     // Run atomic transaction
     const createdInvoice = await prisma.$transaction(async (tx) => {
@@ -152,6 +159,7 @@ export async function POST(req: NextRequest) {
         if (existingCust) {
           resolvedCustomerId = existingCust.id;
         } else if (data.customerName?.trim()) {
+          const now = new Date();
           const newCust = await tx.customer.create({
             data: {
               tenantId: tenant.id,
@@ -159,11 +167,41 @@ export async function POST(req: NextRequest) {
               mobile: cleanMobile,
               address: data.customerAddress?.trim() || null,
               gstNo: data.customerGstNo?.trim() || null,
+              firstVisitAt: now,
+              lastVisitAt: now,
+              totalInvoices: 0,
             },
           });
           resolvedCustomerId = newCust.id;
         }
       }
+
+      // 2.5 Resolve product foreign keys (supports DB cuid, user-facing productId e.g. "1001", or barcode)
+      const resolvedItemsWithProduct = await Promise.all(
+        totals.items.map(async (item) => {
+          let linkedDbProductId: string | null = null;
+          if (item.productId) {
+            const p = await tx.product.findFirst({
+              where: {
+                tenantId: tenant.id,
+                OR: [
+                  { id: item.productId },
+                  { productId: item.productId },
+                  { barcode: item.productId },
+                ],
+              },
+              select: { id: true },
+            });
+            if (p) {
+              linkedDbProductId = p.id;
+            }
+          }
+          return {
+            ...item,
+            linkedDbProductId,
+          };
+        })
+      );
 
       // 3. Create the Invoice record with nested items
       const invoice = await tx.invoice.create({
@@ -180,23 +218,35 @@ export async function POST(req: NextRequest) {
           paidAmount: totals.paidAmount,
           balanceAmount: totals.balanceAmount,
           paymentMode: data.paymentMode,
+          payments: paymentRecords,
           status: totals.status,
           notes: data.notes ?? null,
           metadata: {
             ...(data.metadata || {}),
+            creditNoteId: data.creditNoteId || null,
+            creditNoteAmount: data.creditNoteAmount || null,
             walkInCustomerName: !resolvedCustomerId ? data.customerName : null,
             walkInCustomerMobile: !resolvedCustomerId ? data.customerMobile : null,
           },
           items: {
-            create: totals.items.map((item) => ({
-              productId: item.productId,
+            create: resolvedItemsWithProduct.map((item) => ({
+              productId: item.linkedDbProductId,
               name: item.name,
+              size: item.size ?? null,
+              color: item.color ?? null,
+              brand: item.brand ?? null,
+              mrp: item.mrp ?? null,
               qty: item.qty,
               price: item.price,
+              itemDiscount: item.itemDiscount ?? 0,
+              discountType: item.discountType ?? "amount",
               taxRate: item.taxRate,
               taxAmount: item.taxAmount,
               total: item.total,
-              metadata: item.metadata || {},
+              metadata: {
+                ...(item.metadata || {}),
+                inputProductId: item.productId || null,
+              },
             })),
           },
         },
@@ -206,25 +256,48 @@ export async function POST(req: NextRequest) {
         },
       });
 
-      // 4. Update customer aggregate statistics if linked
+      // 4. Update customer aggregate statistics & udhari credit balance
       if (resolvedCustomerId) {
+        const customerUpdateData: any = {
+          totalBills: { increment: 1 },
+          totalInvoices: { increment: 1 },
+          totalSpent: { increment: totals.totalAmount },
+          totalPaid: { increment: totals.paidAmount },
+          lastVisitAt: new Date(),
+        };
+
+        if (totals.balanceAmount > 0 || data.paymentMode === "CREDIT" || totals.status === "UNPAID") {
+          customerUpdateData.creditBalance = { increment: totals.balanceAmount };
+        }
+
         await tx.customer.update({
           where: { id: resolvedCustomerId },
-          data: {
-            totalBills: { increment: 1 },
-            totalSpent: { increment: totals.totalAmount },
-            lastVisitAt: new Date(),
-          },
+          data: customerUpdateData,
         });
       }
 
-      // 5. Decrement inventory stock for linked products
-      for (const item of totals.items) {
-        if (item.productId) {
+      // 5. If credit note was applied, mark it as USED
+      if (data.creditNoteId) {
+        try {
+          await tx.creditNote.update({
+            where: { id: data.creditNoteId },
+            data: {
+              status: "USED",
+              usedInInvoiceId: invoice.id,
+            },
+          });
+        } catch (cnErr) {
+          console.warn("Could not mark credit note as used:", cnErr);
+        }
+      }
+
+      // 6. Decrement inventory stock for linked products
+      for (const item of resolvedItemsWithProduct) {
+        if (item.linkedDbProductId) {
           try {
             await tx.product.update({
               where: {
-                id: item.productId,
+                id: item.linkedDbProductId,
                 tenantId: tenant.id,
               },
               data: {
@@ -234,7 +307,7 @@ export async function POST(req: NextRequest) {
               },
             });
           } catch (e) {
-            console.warn(`Could not decrement stock for product ${item.productId}:`, e);
+            console.warn(`Could not decrement stock for product ${item.linkedDbProductId}:`, e);
           }
         }
       }

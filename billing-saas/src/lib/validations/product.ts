@@ -8,7 +8,7 @@ const optionalCoercedNumber = z.preprocess(
 export const productSchema = z.object({
   name: z
     .string()
-    .min(2, "Product name must be at least 2 characters")
+    .min(1, "Product name is required")
     .max(150, "Product name is too long"),
   description: z.string().max(500, "Description is too long").optional().nullable(),
   category: z.string().max(100, "Category is too long").optional().nullable(),
@@ -22,8 +22,15 @@ export const productSchema = z.object({
     .max(28, "GST tax rate cannot exceed 28%")
     .default(18),
   hsnCode: z.string().max(20, "HSN code is too long").optional().nullable(),
-  unit: z.string().min(1, "Unit is required").default("pc"),
-  stockQty: optionalCoercedNumber.nullable(),
+  unit: z.string().default("pc"),
+  stockQty: z.coerce
+    .number({ invalid_type_error: "Stock is required" })
+    .min(0, "Stock cannot be negative"),
+  size: z.string().max(50).optional().nullable(),
+  color: z.string().max(50).optional().nullable(),
+  brand: z.string().max(100).optional().nullable(),
+  mrp: optionalCoercedNumber.nullable(),
+  variantGroupId: z.string().max(100).optional().nullable(),
   lowStockAlert: optionalCoercedNumber.nullable(),
   barcode: z.string().max(50, "Barcode is too long").optional().nullable(),
   metadata: z.record(z.any()).optional().nullable(),

@@ -35,12 +35,18 @@ export default async function NewInvoicePage() {
 
   const serializedProducts = products.map((p) => ({
     id: p.id,
+    productId: p.productId,
     name: p.name,
     price: Number(p.price),
     taxRate: Number(p.taxRate),
     unit: p.unit,
     stockQty: p.stockQty !== null ? Number(p.stockQty) : null,
     category: p.category,
+    size: p.size,
+    color: p.color,
+    brand: p.brand,
+    mrp: p.mrp ? Number(p.mrp) : null,
+    barcode: p.barcode,
   }));
 
   return (

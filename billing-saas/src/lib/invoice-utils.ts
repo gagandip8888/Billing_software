@@ -41,8 +41,14 @@ export async function generateInvoiceNumber(
 export interface CalculatedItem {
   productId?: string | null;
   name: string;
+  size?: string | null;
+  color?: string | null;
+  brand?: string | null;
+  mrp?: number | null;
   qty: number;
   price: number;
+  itemDiscount?: number;
+  discountType?: string;
   taxRate: number;
   taxAmount: number;
   total: number;
@@ -67,13 +73,20 @@ export function calculateInvoiceTotals(
   items: Array<{
     productId?: string | null;
     name: string;
+    size?: string | null;
+    color?: string | null;
+    brand?: string | null;
+    mrp?: number | null;
     qty: number;
     price: number;
+    itemDiscount?: number;
+    discountType?: string;
     taxRate?: number;
     metadata?: any;
   }>,
   rawDiscount: number = 0,
-  rawAmountPaid?: number
+  rawAmountPaid?: number,
+  creditNoteAmount: number = 0
 ): InvoiceTotalsResult {
   let subtotal = 0;
   let taxAmount = 0;
@@ -82,8 +95,17 @@ export function calculateInvoiceTotals(
     const qty = Number(item.qty) || 0;
     const price = Number(item.price) || 0;
     const taxRate = Number(item.taxRate) || 0;
+    const rawItemDisc = Number(item.itemDiscount) || 0;
+    const discountType = item.discountType || "amount";
 
-    const lineSubtotal = Math.round(qty * price * 100) / 100;
+    let itemDiscountVal = 0;
+    if (discountType === "percent") {
+      itemDiscountVal = Math.round(qty * price * (rawItemDisc / 100) * 100) / 100;
+    } else {
+      itemDiscountVal = Math.min(qty * price, rawItemDisc);
+    }
+
+    const lineSubtotal = Math.max(0, Math.round((qty * price - itemDiscountVal) * 100) / 100);
     const lineTax = Math.round(lineSubtotal * (taxRate / 100) * 100) / 100;
     const lineTotal = Math.round((lineSubtotal + lineTax) * 100) / 100;
 
@@ -93,8 +115,14 @@ export function calculateInvoiceTotals(
     return {
       productId: item.productId || null,
       name: item.name,
+      size: item.size || null,
+      color: item.color || null,
+      brand: item.brand || null,
+      mrp: item.mrp ? Number(item.mrp) : null,
       qty,
       price,
+      itemDiscount: itemDiscountVal,
+      discountType,
       taxRate,
       taxAmount: lineTax,
       total: lineTotal,
@@ -107,14 +135,21 @@ export function calculateInvoiceTotals(
 
   // Discount cannot exceed subtotal + tax
   const maxAllowedDiscount = Math.round((subtotal + taxAmount) * 100) / 100;
-  const discountAmount = Math.min(
+  const billDiscount = Math.min(
     Math.max(0, Number(rawDiscount) || 0),
     maxAllowedDiscount
   );
 
+  const appliedCredit = Math.min(
+    Math.max(0, Number(creditNoteAmount) || 0),
+    Math.max(0, subtotal + taxAmount - billDiscount)
+  );
+
+  const totalDiscount = billDiscount + appliedCredit;
+
   const totalAmount = Math.max(
     0,
-    Math.round((subtotal + taxAmount - discountAmount) * 100) / 100
+    Math.round((subtotal + taxAmount - totalDiscount) * 100) / 100
   );
 
   // If amountPaid is not provided, default to full payment (PAID)
@@ -140,7 +175,7 @@ export function calculateInvoiceTotals(
   return {
     subtotal,
     taxAmount,
-    discountAmount,
+    discountAmount: billDiscount,
     totalAmount,
     paidAmount,
     balanceAmount,
@@ -184,6 +219,8 @@ export function serializeInvoice(invoice: any) {
           ...item,
           qty: Number(item.qty),
           price: Number(item.price),
+          mrp: item.mrp !== null && item.mrp !== undefined ? Number(item.mrp) : null,
+          itemDiscount: item.itemDiscount !== null && item.itemDiscount !== undefined ? Number(item.itemDiscount) : 0,
           taxRate: Number(item.taxRate),
           taxAmount: Number(item.taxAmount),
           total: Number(item.total),
@@ -193,6 +230,7 @@ export function serializeInvoice(invoice: any) {
       ? {
           ...invoice.customer,
           totalSpent: Number(invoice.customer.totalSpent || 0),
+          creditBalance: Number(invoice.customer.creditBalance || 0),
         }
       : null,
   };

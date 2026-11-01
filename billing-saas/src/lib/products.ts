@@ -7,6 +7,10 @@ export function serializeProduct(product: any) {
   return {
     ...product,
     price: Number(product.price),
+    mrp:
+      product.mrp !== null && product.mrp !== undefined
+        ? Number(product.mrp)
+        : null,
     costPrice:
       product.costPrice !== null && product.costPrice !== undefined
         ? Number(product.costPrice)

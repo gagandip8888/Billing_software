@@ -16,6 +16,10 @@ import {
   Loader2,
   CheckCircle2,
   Percent,
+  Shirt,
+  Plus,
+  Trash2,
+  Tag,
 } from "lucide-react";
 
 import { productSchema, ProductInput } from "@/lib/validations/product";
@@ -42,6 +46,7 @@ export interface ProductFormProps {
 }
 
 const COMMON_GST_RATES = [0, 5, 12, 18, 28];
+const CLOTHING_SIZES = ["XS", "S", "M", "L", "XL", "XXL", "3XL", "28", "30", "32", "34", "36", "38", "40", "42", "Free Size"];
 
 export function ProductForm({
   initialData,
@@ -60,32 +65,69 @@ export function ProductForm({
     (session?.user?.shopType as string) ||
     "CUSTOM";
 
+  const isClothingShop =
+    shopType === "CLOTH_SHOP" ||
+    shopType === "CLOTHING" ||
+    shopType?.toLowerCase().includes("cloth") ||
+    (session?.user?.shopType as string) === "CLOTH_SHOP" ||
+    (session?.user?.shopType as string) === "CLOTHING";
+
   const template = SHOP_TEMPLATES[shopType] || SHOP_TEMPLATES.CUSTOM;
 
   // Initialize form
   const isEditing = Boolean(initialData?.id);
 
+  // Multi-size variant generator state
+  const [sizeVariants, setSizeVariants] = useState<
+    Array<{ size: string; color: string; stockQty: number; barcode?: string }>
+  >([]);
+
+  // Auto-generated Product ID display
+  const [autoProductId, setAutoProductId] = useState<string>(
+    initialData?.productId || ""
+  );
+
+  React.useEffect(() => {
+    if (initialData?.productId) {
+      setAutoProductId(String(initialData.productId));
+    } else {
+      fetch("/api/products?nextId=true")
+        .then((res) => res.json())
+        .then((data) => {
+          if (data?.nextProductNo) {
+            setAutoProductId(String(data.nextProductNo));
+          }
+        })
+        .catch(() => {});
+    }
+  }, [initialData?.productId]);
+
   const defaultValues: Partial<ProductInput> = {
     name: initialData?.name || "",
     description: initialData?.description || "",
-    category: initialData?.category || "",
+    category: initialData?.category || (isClothingShop ? "Clothing" : ""),
+    size: initialData?.size || "",
+    color: initialData?.color || "",
+    brand: initialData?.brand || "",
+    mrp: initialData?.mrp ? Number(initialData.mrp) : undefined,
+    variantGroupId: initialData?.variantGroupId || "",
     price: initialData?.price !== undefined ? Number(initialData.price) : 0,
     costPrice: initialData?.costPrice ? Number(initialData.costPrice) : undefined,
     taxRate:
       initialData?.taxRate !== undefined
         ? Number(initialData.taxRate)
         : template.taxEnabled
-        ? template.defaultGstRate
+        ? (isClothingShop ? 5 : template.defaultGstRate)
         : 0,
-    hsnCode: initialData?.hsnCode || "",
-    unit: initialData?.unit || (template.units?.[0] ?? "pc"),
+    hsnCode: initialData?.hsnCode || (isClothingShop ? "6205" : ""),
+    unit: initialData?.unit || (isClothingShop ? "piece" : template.units?.[0] ?? "pc"),
     stockQty: initialData?.stockQty !== null && initialData?.stockQty !== undefined
       ? Number(initialData.stockQty)
       : undefined,
     lowStockAlert:
       initialData?.lowStockAlert !== null && initialData?.lowStockAlert !== undefined
         ? Number(initialData.lowStockAlert)
-        : undefined,
+        : (isClothingShop ? 5 : undefined),
     barcode: initialData?.barcode || "",
     metadata: (initialData?.metadata as Record<string, any>) || {},
     isActive: initialData?.isActive ?? true,
@@ -107,7 +149,31 @@ export function ProductForm({
 
   const currentTaxRate = watch("taxRate");
   const currentUnit = watch("unit");
+  const currentSize = watch("size");
+  const currentColor = watch("color");
   const metadataValues = watch("metadata") || {};
+
+  function addSizeVariantRow() {
+    setSizeVariants((prev) => [
+      ...prev,
+      {
+        size: "L",
+        color: currentColor || "Default",
+        stockQty: 10,
+        barcode: "",
+      },
+    ]);
+  }
+
+  function removeSizeVariantRow(index: number) {
+    setSizeVariants((prev) => prev.filter((_, idx) => idx !== index));
+  }
+
+  function updateSizeVariant(index: number, key: string, val: any) {
+    setSizeVariants((prev) =>
+      prev.map((v, idx) => (idx === index ? { ...v, [key]: val } : v))
+    );
+  }
 
   async function onSubmit(data: ProductInput) {
     setIsSubmitting(true);
@@ -117,10 +183,20 @@ export function ProductForm({
         : "/api/products";
       const method = isEditing ? "PATCH" : "POST";
 
+      // If size variants were added, attach variantGroupId
+      const variantGroupId =
+        data.variantGroupId ||
+        (sizeVariants.length > 0 ? `vg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}` : null);
+
+      const mainProductPayload = {
+        ...data,
+        variantGroupId: variantGroupId || null,
+      };
+
       const res = await fetch(endpoint, {
         method,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
+        body: JSON.stringify(mainProductPayload),
       });
 
       const result = await res.json();
@@ -129,11 +205,39 @@ export function ProductForm({
         throw new Error(result.error || "Failed to save product");
       }
 
+      // If additional size variants defined, create them too
+      if (sizeVariants.length > 0 && !isEditing) {
+        for (const variant of sizeVariants) {
+          try {
+            await fetch("/api/products", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                ...data,
+                size: variant.size,
+                color: variant.color || data.color,
+                stockQty: Number(variant.stockQty) || 0,
+                barcode: variant.barcode || undefined,
+                variantGroupId,
+              }),
+            });
+          } catch (varErr) {
+            console.warn("Failed to create child variant:", varErr);
+          }
+        }
+      }
+
       toast.success(
         isEditing
           ? "Product updated successfully"
+          : sizeVariants.length > 0
+          ? `Created product and ${sizeVariants.length} size variants!`
           : "Product added to catalog"
       );
+
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("products:updated"));
+      }
 
       if (onSuccess) {
         onSuccess(result.product);
@@ -168,6 +272,21 @@ export function ProductForm({
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Read-only Auto-generated Product ID */}
+          <div className="space-y-1.5 md:col-span-2">
+            <Label htmlFor="productId" className="text-xs font-semibold text-slate-700 flex items-center justify-between">
+              <span>Product ID</span>
+              <span className="text-[11px] font-normal text-slate-400">Auto-generated</span>
+            </Label>
+            <Input
+              id="productId"
+              value={autoProductId ? `Product ID: ${autoProductId} (Auto-generated)` : "Product ID: (Auto-generated)"}
+              readOnly
+              disabled
+              className="h-9 text-xs bg-slate-50 text-slate-700 font-mono font-semibold cursor-not-allowed border-slate-200"
+            />
+          </div>
+
           <div className="space-y-1.5 md:col-span-2">
             <Label htmlFor="name" className="text-xs font-semibold text-slate-700">
               Product / Service Name <span className="text-red-500">*</span>
@@ -261,6 +380,181 @@ export function ProductForm({
           </div>
         </div>
       </div>
+
+      {/* CLOTHING MATRIX SECTION (for CLOTH_SHOP / CLOTHING) */}
+      {isClothingShop && (
+        <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm space-y-4">
+          <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+            <div className="flex items-center gap-2">
+              <div className="h-8 w-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                <Shirt className="h-4 w-4" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-800">Clothing & Apparel Specifications</h3>
+                <p className="text-xs text-slate-500">Size, Color, Brand, MRP, and size variants</p>
+              </div>
+            </div>
+            <Badge className="bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border-indigo-200 text-[11px]">
+              Clothing Matrix
+            </Badge>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="brand" className="text-xs font-semibold text-slate-700">
+                Brand / Label
+              </Label>
+              <Input
+                id="brand"
+                placeholder="e.g. Levis, Zara, Raymond"
+                className="h-9 text-sm"
+                {...register("brand")}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="color" className="text-xs font-semibold text-slate-700">
+                Color / Shade
+              </Label>
+              <Input
+                id="color"
+                placeholder="e.g. Blue, Black, Maroon"
+                className="h-9 text-sm"
+                {...register("color")}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="size" className="text-xs font-semibold text-slate-700">
+                Primary Size
+              </Label>
+              <Input
+                id="size"
+                placeholder="e.g. L, 32, Free Size"
+                className="h-9 text-sm"
+                {...register("size")}
+              />
+              <div className="flex flex-wrap gap-1 pt-1">
+                {["S", "M", "L", "XL", "XXL", "30", "32", "34", "36"].map((sz) => (
+                  <button
+                    key={sz}
+                    type="button"
+                    onClick={() => setValue("size", sz)}
+                    className={`text-[10px] px-1.5 py-0.5 rounded border transition ${
+                      currentSize === sz
+                        ? "bg-indigo-600 text-white border-indigo-600 font-bold"
+                        : "bg-slate-50 text-slate-600 hover:bg-slate-100 border-slate-200"
+                    }`}
+                  >
+                    {sz}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="mrp" className="text-xs font-semibold text-slate-700">
+                MRP (Printed Price ₹)
+              </Label>
+              <div className="relative">
+                <span className="absolute left-3 top-2 text-xs font-semibold text-slate-400">₹</span>
+                <Input
+                  id="mrp"
+                  type="number"
+                  step="0.01"
+                  placeholder="0.00"
+                  className="pl-7 h-9 text-sm font-semibold text-slate-900"
+                  {...register("mrp")}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Add Size Variant Section */}
+          {!isEditing && (
+            <div className="pt-3 border-t border-slate-100 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-xs font-bold text-slate-800">Additional Size Variants</h4>
+                  <p className="text-[11px] text-slate-500">
+                    Stocking this same shirt/pant in multiple sizes? Add them here to create all variants at once.
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={addSizeVariantRow}
+                  className="h-8 text-xs font-semibold text-indigo-600 border-indigo-200 hover:bg-indigo-50 flex items-center gap-1"
+                >
+                  <Plus className="h-3.5 w-3.5" /> Add Size Variant
+                </Button>
+              </div>
+
+              {sizeVariants.length > 0 && (
+                <div className="space-y-2 bg-slate-50/70 p-3 rounded-lg border border-slate-200">
+                  <div className="grid grid-cols-12 gap-2 text-[11px] font-bold text-slate-600 px-1">
+                    <span className="col-span-3">Size</span>
+                    <span className="col-span-3">Color</span>
+                    <span className="col-span-2">Stock Qty</span>
+                    <span className="col-span-3">Barcode (optional)</span>
+                    <span className="col-span-1 text-right">Remove</span>
+                  </div>
+
+                  {sizeVariants.map((variant, idx) => (
+                    <div key={idx} className="grid grid-cols-12 gap-2 items-center">
+                      <div className="col-span-3">
+                        <Input
+                          placeholder="e.g. XL or 34"
+                          value={variant.size}
+                          onChange={(e) => updateSizeVariant(idx, "size", e.target.value)}
+                          className="h-8 text-xs bg-white"
+                        />
+                      </div>
+                      <div className="col-span-3">
+                        <Input
+                          placeholder="e.g. Blue"
+                          value={variant.color}
+                          onChange={(e) => updateSizeVariant(idx, "color", e.target.value)}
+                          className="h-8 text-xs bg-white"
+                        />
+                      </div>
+                      <div className="col-span-2">
+                        <Input
+                          type="number"
+                          placeholder="Qty"
+                          value={variant.stockQty}
+                          onChange={(e) => updateSizeVariant(idx, "stockQty", e.target.value)}
+                          className="h-8 text-xs bg-white"
+                        />
+                      </div>
+                      <div className="col-span-3">
+                        <Input
+                          placeholder="Barcode / SKU"
+                          value={variant.barcode || ""}
+                          onChange={(e) => updateSizeVariant(idx, "barcode", e.target.value)}
+                          className="h-8 text-xs bg-white"
+                        />
+                      </div>
+                      <div className="col-span-1 text-right">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => removeSizeVariantRow(idx)}
+                          className="h-8 w-8 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* SECTION 2: PRICING & GST TAX */}
       <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm space-y-4">

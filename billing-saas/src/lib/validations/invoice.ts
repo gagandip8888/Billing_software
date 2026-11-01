@@ -1,15 +1,29 @@
 import { z } from "zod";
 import { PaymentMode, InvoiceStatus } from "@prisma/client";
 
+export const paymentSplitSchema = z.object({
+  mode: z.nativeEnum(PaymentMode),
+  amount: z.coerce.number().min(0),
+});
+
 export const invoiceItemSchema = z.object({
   productId: z.string().optional().nullable(),
   name: z.string().min(1, "Item name is required"),
+  size: z.string().optional().nullable(),
+  color: z.string().optional().nullable(),
+  brand: z.string().optional().nullable(),
+  mrp: z.coerce.number().min(0).optional().nullable(),
   qty: z.coerce
     .number({ invalid_type_error: "Quantity must be a number" })
     .positive("Quantity must be greater than 0"),
   price: z.coerce
     .number({ invalid_type_error: "Price must be a number" })
     .min(0, "Price cannot be negative"),
+  itemDiscount: z.coerce
+    .number({ invalid_type_error: "Item discount must be a number" })
+    .min(0, "Item discount cannot be negative")
+    .default(0),
+  discountType: z.string().default("amount"),
   taxRate: z.coerce
     .number({ invalid_type_error: "Tax rate must be a number" })
     .min(0, "Tax rate cannot be negative")
@@ -20,19 +34,21 @@ export const invoiceItemSchema = z.object({
 
 export const invoiceSchema = z.object({
   customerId: z.string().optional().nullable(),
-  customerName: z.string().max(100).optional().nullable(),
+  customerName: z.string().min(1, "Customer name is required").max(100),
   customerMobile: z
     .string()
-    .max(15)
-    .optional()
-    .nullable(),
+    .min(1, "Mobile number is required")
+    .max(15),
   customerAddress: z.string().max(255).optional().nullable(),
   customerGstNo: z.string().max(15).optional().nullable(),
   paymentMode: z.nativeEnum(PaymentMode).default(PaymentMode.CASH),
+  payments: z.array(paymentSplitSchema).optional().nullable(),
   discountAmount: z.coerce
     .number({ invalid_type_error: "Discount must be a number" })
     .min(0, "Discount cannot be negative")
     .default(0),
+  creditNoteId: z.string().optional().nullable(),
+  creditNoteAmount: z.coerce.number().min(0).optional().default(0),
   amountPaid: z.coerce
     .number({ invalid_type_error: "Amount paid must be a number" })
     .min(0, "Amount paid cannot be negative")

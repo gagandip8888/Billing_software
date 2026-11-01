@@ -4,6 +4,8 @@ import { requireTenant } from "@/lib/tenant";
 import { productSchema } from "@/lib/validations/product";
 import { serializeProduct } from "@/lib/products";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(req: NextRequest) {
   try {
     const tenant = await requireTenant();
@@ -12,6 +14,9 @@ export async function GET(req: NextRequest) {
     const search = searchParams.get("search")?.trim();
     const category = searchParams.get("category")?.trim();
     const isActiveParam = searchParams.get("isActive");
+    const isLowStockOnly =
+      searchParams.get("lowStock") === "true" ||
+      searchParams.get("filter") === "low_stock";
 
     const where: any = {
       tenantId: tenant.id,
@@ -21,12 +26,21 @@ export async function GET(req: NextRequest) {
       where.isActive = isActiveParam === "true";
     }
 
+    if (searchParams.get("nextId") === "true") {
+      const t = await prisma.tenant.findUnique({
+        where: { id: tenant.id },
+        select: { nextProductNo: true },
+      });
+      return NextResponse.json({ nextProductNo: t?.nextProductNo ?? 1001 });
+    }
+
     if (category && category !== "all") {
       where.category = category;
     }
 
     if (search) {
       where.OR = [
+        { productId: { contains: search, mode: "insensitive" } },
         { name: { contains: search, mode: "insensitive" } },
         { barcode: { contains: search, mode: "insensitive" } },
         { hsnCode: { contains: search, mode: "insensitive" } },
@@ -34,13 +48,23 @@ export async function GET(req: NextRequest) {
       ];
     }
 
-    const [products, total] = await Promise.all([
-      prisma.product.findMany({
-        where,
-        orderBy: { createdAt: "desc" },
-      }),
-      prisma.product.count({ where }),
-    ]);
+    // Execute queries sequentially to avoid connection contention on PgBouncer (connection_limit=1)
+    let products = await prisma.product.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+    });
+
+    if (isLowStockOnly) {
+      products = products.filter(
+        (p) =>
+          p.stockQty !== null &&
+          p.stockQty !== undefined &&
+          Number(p.stockQty) <=
+            Number(p.lowStockAlert !== null && p.lowStockAlert !== undefined ? p.lowStockAlert : 5)
+      );
+    }
+
+    const total = isLowStockOnly ? products.length : await prisma.product.count({ where });
 
     return NextResponse.json({
       products: products.map(serializeProduct),
@@ -52,7 +76,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
     return NextResponse.json(
-      { error: "Failed to fetch products" },
+      { error: "Failed to fetch products", details: error?.message || String(error) },
       { status: 500 }
     );
   }
@@ -73,23 +97,48 @@ export async function POST(req: NextRequest) {
 
     const data = parsed.data;
 
-    const newProduct = await prisma.product.create({
-      data: {
-        tenantId: tenant.id,
-        name: data.name,
-        description: data.description ?? null,
-        category: data.category ?? null,
-        price: data.price,
-        costPrice: data.costPrice ?? null,
-        taxRate: data.taxRate ?? 18,
-        hsnCode: data.hsnCode ?? null,
-        unit: data.unit ?? "pc",
-        stockQty: data.stockQty ?? null,
-        lowStockAlert: data.lowStockAlert ?? null,
-        barcode: data.barcode ?? null,
-        metadata: data.metadata ?? {},
-        isActive: data.isActive ?? true,
-      },
+    // Transaction to auto-generate sequential productId from tenant.nextProductNo
+    const newProduct = await prisma.$transaction(async (tx) => {
+      const t = await tx.tenant.findUnique({
+        where: { id: tenant.id },
+        select: { nextProductNo: true },
+      });
+
+      let candidateNo = t?.nextProductNo ?? 1001;
+      while (await tx.product.findUnique({ where: { productId: String(candidateNo) } })) {
+        candidateNo++;
+      }
+      const productId = String(candidateNo);
+
+      await tx.tenant.update({
+        where: { id: tenant.id },
+        data: { nextProductNo: candidateNo + 1 },
+      });
+
+      return tx.product.create({
+        data: {
+          tenantId: tenant.id,
+          productId,
+          name: data.name,
+          description: data.description ?? null,
+          category: data.category ?? null,
+          size: data.size ?? null,
+          color: data.color ?? null,
+          brand: data.brand ?? null,
+          mrp: data.mrp ?? null,
+          variantGroupId: data.variantGroupId ?? null,
+          price: data.price,
+          costPrice: data.costPrice ?? null,
+          taxRate: data.taxRate ?? 18,
+          hsnCode: data.hsnCode ?? null,
+          unit: data.unit ?? "pc",
+          stockQty: data.stockQty ?? null,
+          lowStockAlert: data.lowStockAlert ?? null,
+          barcode: data.barcode ?? null,
+          metadata: data.metadata ?? {},
+          isActive: data.isActive ?? true,
+        },
+      });
     });
 
     return NextResponse.json(

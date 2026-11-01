@@ -13,6 +13,11 @@ export function middleware(request: NextRequest) {
 
   const isAuthenticated = Boolean(sessionToken);
 
+  // Redirect logged-in users opening the software (root "/") directly to the new billing counter
+  if (pathname === "/" && isAuthenticated) {
+    return NextResponse.redirect(new URL("/billing/new", request.url));
+  }
+
   const isAuthRoute =
     pathname.startsWith("/login") || pathname.startsWith("/register");
 
@@ -23,11 +28,15 @@ export function middleware(request: NextRequest) {
     pathname.startsWith("/customers") ||
     pathname.startsWith("/products") ||
     pathname.startsWith("/reports") ||
-    pathname.startsWith("/settings");
+    pathname.startsWith("/settings") ||
+    pathname.startsWith("/hold-bills") ||
+    pathname.startsWith("/udhari") ||
+    pathname.startsWith("/credit-notes") ||
+    pathname.startsWith("/returns");
 
-  // Redirect logged-in users away from login/register to dashboard
+  // Redirect logged-in users away from login/register to /billing/new
   if (isAuthRoute && isAuthenticated) {
-    return NextResponse.redirect(new URL("/dashboard", request.url));
+    return NextResponse.redirect(new URL("/billing/new", request.url));
   }
 
   // Redirect unauthenticated users attempting to access protected dashboard routes
@@ -42,6 +51,7 @@ export function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
+    "/",
     "/dashboard/:path*",
     "/billing/:path*",
     "/invoices/:path*",
@@ -49,7 +59,12 @@ export const config = {
     "/products/:path*",
     "/reports/:path*",
     "/settings/:path*",
+    "/hold-bills/:path*",
+    "/udhari/:path*",
+    "/credit-notes/:path*",
+    "/returns/:path*",
     "/login",
     "/register",
   ],
 };
+

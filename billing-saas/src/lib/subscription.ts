@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { prisma } from "@/lib/prisma";
 import { PLANS, PlanId, PlanConfig, getPlan } from "@/lib/plans";
 import { startOfMonth, endOfMonth, differenceInDays } from "date-fns";
@@ -36,9 +37,8 @@ export interface SubscriptionStatus {
 /**
  * Fetch full subscription status, bill limits, and usage metrics for a tenant
  */
-export async function getTenantSubscription(
-  tenantId: string
-): Promise<SubscriptionStatus> {
+export const getTenantSubscription = cache(
+  async (tenantId: string): Promise<SubscriptionStatus> => {
   const [tenant, subscription, userCount] = await Promise.all([
     prisma.tenant.findUnique({
       where: { id: tenantId },
@@ -141,7 +141,7 @@ export async function getTenantSubscription(
         }
       : null,
   };
-}
+});
 
 /**
  * Check if the tenant is allowed to create another bill right now

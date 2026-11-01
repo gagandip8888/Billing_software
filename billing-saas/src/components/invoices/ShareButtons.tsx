@@ -23,22 +23,22 @@ export function ShareButtons({
   customerMobile,
 }: ShareButtonsProps) {
   const [copied, setCopied] = useState(false);
+  const [invoiceUrl, setInvoiceUrl] = useState(`/invoices/${invoiceId}`);
 
-  // Clean mobile for wa.me link
-  let cleanMobile = (customerMobile || "").replace(/\D/g, "");
-  if (cleanMobile.length === 10) {
-    cleanMobile = "91" + cleanMobile; // Default to India country code
-  }
+  React.useEffect(() => {
+    if (typeof window !== "undefined") {
+      setInvoiceUrl(`${window.location.origin}/invoices/${invoiceId}`);
+    }
+  }, [invoiceId]);
 
-  const invoiceUrl =
-    typeof window !== "undefined"
-      ? `${window.location.origin}/invoices/${invoiceId}`
-      : `/invoices/${invoiceId}`;
+  // Clean mobile for wa.me link (91 + 10 digits)
+  const mobileDigits = (customerMobile || "").replace(/\D/g, "");
+  const cleanMobile = mobileDigits.length >= 10 ? `91${mobileDigits.slice(-10)}` : "";
 
   const displayName = customerName?.trim() || "Customer";
-  const whatsappMessage = `Hi ${displayName}, your bill #${invoiceNo} of ₹${totalAmount.toFixed(
+  const whatsappMessage = `Hi ${displayName}, here is your bill from ${businessName}. Total: ₹${totalAmount.toFixed(
     2
-  )} from ${businessName} is ready. View invoice: ${invoiceUrl}`;
+  )}. View PDF: ${invoiceUrl}`;
 
   const whatsappHref = cleanMobile
     ? `https://wa.me/${cleanMobile}?text=${encodeURIComponent(whatsappMessage)}`
@@ -60,14 +60,17 @@ export function ShareButtons({
   return (
     <div className="flex flex-wrap items-center gap-2">
       {/* WhatsApp Share */}
-      <a href={whatsappHref} target="_blank" rel="noopener noreferrer">
-        <Button
-          size="sm"
-          className="h-9 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm flex items-center gap-1.5"
-        >
-          <MessageCircle className="h-4 w-4" /> WhatsApp Bill
-        </Button>
-      </a>
+      <Button
+        type="button"
+        onClick={() => {
+          window.open(whatsappHref, "_blank");
+          toast.success("Bill saved. Please share the PDF on WhatsApp.");
+        }}
+        size="sm"
+        className="h-9 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm flex items-center gap-1.5"
+      >
+        <MessageCircle className="h-4 w-4" /> Share to WhatsApp
+      </Button>
 
       {/* Print Trigger */}
       <Button

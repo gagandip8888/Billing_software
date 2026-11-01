@@ -5,6 +5,8 @@ import { SessionProvider } from "next-auth/react";
 import { NetworkStatusIndicator } from "@/components/shared/network-status-indicator";
 import { PwaInstallBanner } from "@/components/shared/pwa-install-prompt";
 
+import { LanguageProvider } from "@/lib/language-context";
+
 export function Providers({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (
@@ -24,9 +26,11 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
   return (
     <SessionProvider>
-      <NetworkStatusIndicator />
-      <PwaInstallBanner />
-      {children}
+      <LanguageProvider>
+        <NetworkStatusIndicator />
+        <PwaInstallBanner />
+        {children}
+      </LanguageProvider>
     </SessionProvider>
   );
 }
