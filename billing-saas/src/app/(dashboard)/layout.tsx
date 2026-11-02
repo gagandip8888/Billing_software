@@ -27,8 +27,11 @@ export default async function DashboardLayout({
         <div>
           {/* Business & Tenant Header */}
           <div className="p-4 border-b border-slate-800">
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-xl bg-[#7C3AED] flex items-center justify-center text-white shadow-md shadow-purple-900/40 shrink-0">
+            <Link
+              href={userRole === "CASHIER" ? "/billing/new" : "/dashboard"}
+              className="flex items-center gap-3 group"
+            >
+              <div className="h-10 w-10 rounded-xl bg-[#7C3AED] flex items-center justify-center text-white shadow-md shadow-purple-900/40 shrink-0 group-hover:scale-105 transition">
                 <Store className="h-5 w-5" />
               </div>
               <div className="min-w-0 flex-1">
@@ -37,26 +40,32 @@ export default async function DashboardLayout({
                 </div>
                 <div className="flex items-center gap-1.5 mt-0.5">
                   <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold bg-purple-950/80 text-purple-300 border border-purple-800/40 capitalize truncate">
-                    {shopType.toLowerCase()}
+                    {userRole === "CASHIER" ? "Staff Terminal" : shopType.toLowerCase()}
                   </span>
                 </div>
               </div>
-            </div>
+            </Link>
           </div>
 
           {/* Sidebar Navigation */}
-          <SidebarNav />
+          <SidebarNav userRole={userRole} />
         </div>
 
         {/* User / Shop Footer */}
         <div className="p-3 border-t border-slate-800">
           <div className="px-3 py-2 flex items-center gap-2.5 rounded-lg bg-slate-800/50 border border-slate-800">
-            <div className="h-7 w-7 rounded-full bg-[#7C3AED]/20 border border-purple-500/30 flex items-center justify-center text-purple-300 shrink-0">
+            <div className={`h-7 w-7 rounded-full flex items-center justify-center shrink-0 ${
+              userRole === "CASHIER" 
+                ? "bg-amber-500/20 border border-amber-500/40 text-amber-300"
+                : "bg-[#7C3AED]/20 border border-purple-500/30 text-purple-300"
+            }`}>
               <UserIcon className="h-4 w-4" />
             </div>
             <div className="min-w-0 flex-1">
               <p className="text-xs font-semibold text-slate-200 truncate">{userName}</p>
-              <p className="text-[10px] text-slate-400 font-mono truncate">{userMobile || userRole}</p>
+              <p className="text-[10px] text-slate-400 font-mono truncate">
+                {userRole === "CASHIER" ? "Employee / Cashier" : "Store Owner"} {userMobile ? `• ${userMobile}` : ""}
+              </p>
             </div>
           </div>
         </div>

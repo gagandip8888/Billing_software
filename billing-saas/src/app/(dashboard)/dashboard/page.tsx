@@ -1,5 +1,6 @@
 import React, { Suspense } from "react";
-import { requireTenant } from "@/lib/tenant";
+import { redirect } from "next/navigation";
+import { requireTenant, getSessionUser } from "@/lib/tenant";
 import { prisma } from "@/lib/prisma";
 import { startOfDay, endOfDay, subDays, startOfMonth, format } from "date-fns";
 import { DashboardClient } from "@/components/dashboard/DashboardClient";
@@ -8,6 +9,13 @@ import DashboardLoading from "@/app/(dashboard)/loading";
 export const dynamic = "force-dynamic";
 
 async function DashboardData() {
+  const sessionUser = await getSessionUser();
+
+  // Strict Permission Guard: Employees/Cashiers cannot view Dashboard or Profit/Loss metrics
+  if (sessionUser?.role === "CASHIER") {
+    redirect("/billing/new");
+  }
+
   const tenant = await requireTenant();
   const now = new Date();
   const todayStart = startOfDay(now);

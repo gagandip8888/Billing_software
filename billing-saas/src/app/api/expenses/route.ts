@@ -1,11 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireTenant } from "@/lib/tenant";
+import { requireTenant, getSessionUser } from "@/lib/tenant";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   try {
+    const sessionUser = await getSessionUser();
+    if (sessionUser && sessionUser.role === "CASHIER") {
+      return NextResponse.json(
+        { error: "Forbidden: Employees cannot view store expenses" },
+        { status: 403 }
+      );
+    }
+
     const tenant = await requireTenant();
 
     const expenses = await prisma.expense.findMany({
@@ -36,6 +44,14 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const sessionUser = await getSessionUser();
+    if (sessionUser && sessionUser.role === "CASHIER") {
+      return NextResponse.json(
+        { error: "Forbidden: Employees cannot record store expenses" },
+        { status: 403 }
+      );
+    }
+
     const tenant = await requireTenant();
     const body = await req.json();
 

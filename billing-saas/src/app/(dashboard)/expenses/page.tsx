@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
 import {
   Receipt,
   Plus,
@@ -33,6 +35,16 @@ interface ExpenseItem {
 }
 
 export default function ExpensesPage() {
+  const router = useRouter();
+  const { data: session, status } = useSession();
+
+  // Strict Permission Guard: Employees/Cashiers cannot view or record expenses
+  useEffect(() => {
+    if (status === "authenticated" && (session?.user as any)?.role === "CASHIER") {
+      router.replace("/billing/new");
+    }
+  }, [session, status, router]);
+
   const [expenses, setExpenses] = useState<ExpenseItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);

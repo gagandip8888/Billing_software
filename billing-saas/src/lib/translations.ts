@@ -87,6 +87,7 @@ export const translations = {
     confirmDelete: "Delete Invoice",
     cancel: "Cancel",
     noPasswordWarning: "No password set. Anyone can delete bills. Please set one in Settings.",
+    staffManagement: "Staff Management",
   },
   mr: {
     // Navigation
@@ -172,5 +173,6 @@ export const translations = {
     confirmDelete: "बिल डिलीट करा",
     cancel: "रद्द करा",
     noPasswordWarning: "कोणताही पासवर्ड सेट केलेला नाही. कोणीही बिले डिलीट करू शकते. कृपया सेटिंग्जमध्ये एक सेट करा.",
+    staffManagement: "कर्मचारी व्यवस्थापन",
   },
 };

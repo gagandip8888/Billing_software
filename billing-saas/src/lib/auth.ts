@@ -27,9 +27,10 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
 
         const { mobile, password } = parsed.data;
 
-        const user = await prisma.user.findFirst({
+        // Find users matching mobile (handles owner or employee across tenants)
+        const users = await prisma.user.findMany({
           where: {
-            mobile,
+            mobile: mobile.trim(),
             isActive: true,
           },
           include: {
@@ -37,12 +38,22 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           },
         });
 
-        if (!user || !user.tenant || !user.tenant.isActive) {
+        if (!users || users.length === 0) {
           return null;
         }
 
-        const isValid = await bcrypt.compare(password, user.passwordHash);
-        if (!isValid) {
+        let user: (typeof users)[0] | null = null;
+        for (const candidate of users) {
+          if (candidate.tenant && candidate.tenant.isActive) {
+            const isValid = await bcrypt.compare(password, candidate.passwordHash);
+            if (isValid) {
+              user = candidate;
+              break;
+            }
+          }
+        }
+
+        if (!user || !user.tenant) {
           return null;
         }
 

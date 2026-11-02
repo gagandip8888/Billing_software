@@ -191,6 +191,14 @@ export async function DELETE(req: NextRequest, { params }: RouteParams) {
     const session = await auth();
     const userRole = session?.user?.role;
 
+    // Strict Employee Guard: Employees / Cashiers cannot delete bills (Task 2)
+    if (userRole === "CASHIER") {
+      return NextResponse.json(
+        { error: "Forbidden: Employees / Cashiers are not permitted to delete bills" },
+        { status: 403 }
+      );
+    }
+
     // Check Tenant Settings for Delete Password
     const tenantSetting = await prisma.setting.findUnique({
       where: { tenantId: tenant.id },

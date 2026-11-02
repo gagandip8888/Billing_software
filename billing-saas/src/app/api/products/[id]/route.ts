@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireTenant } from "@/lib/tenant";
+import { requireTenant, getSessionUser } from "@/lib/tenant";
 import { productUpdateSchema } from "@/lib/validations/product";
 import { serializeProduct } from "@/lib/products";
 
@@ -112,6 +112,14 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
 
 export async function DELETE(req: NextRequest, { params }: RouteParams) {
   try {
+    const sessionUser = await getSessionUser();
+    if (sessionUser && sessionUser.role === "CASHIER") {
+      return NextResponse.json(
+        { error: "Forbidden: Employees cannot delete products" },
+        { status: 403 }
+      );
+    }
+
     const tenant = await requireTenant();
     const { id } = params;
 

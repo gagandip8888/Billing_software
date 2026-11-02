@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireTenant } from "@/lib/tenant";
+import { requireTenant, getSessionUser } from "@/lib/tenant";
 import { productSchema } from "@/lib/validations/product";
 import { serializeProduct } from "@/lib/products";
 
@@ -84,6 +84,14 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const sessionUser = await getSessionUser();
+    if (sessionUser && sessionUser.role === "CASHIER") {
+      return NextResponse.json(
+        { error: "Forbidden: Employees cannot create new products" },
+        { status: 403 }
+      );
+    }
+
     const tenant = await requireTenant();
     const body = await req.json();
 

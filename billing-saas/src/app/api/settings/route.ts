@@ -1,11 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireTenant } from "@/lib/tenant";
+import { requireTenant, getSessionUser } from "@/lib/tenant";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
+    const sessionUser = await getSessionUser();
+    if (sessionUser && sessionUser.role === "CASHIER") {
+      return NextResponse.json(
+        { error: "Forbidden: Employees cannot view settings" },
+        { status: 403 }
+      );
+    }
+
     const tenant = await requireTenant();
 
     let setting = await prisma.setting.findUnique({
@@ -35,6 +43,14 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
+    const sessionUser = await getSessionUser();
+    if (sessionUser && sessionUser.role === "CASHIER") {
+      return NextResponse.json(
+        { error: "Forbidden: Employees cannot modify settings" },
+        { status: 403 }
+      );
+    }
+
     const tenant = await requireTenant();
     const body = await req.json();
 

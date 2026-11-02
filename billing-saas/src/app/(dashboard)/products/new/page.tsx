@@ -1,12 +1,18 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { ArrowLeft, PackagePlus } from "lucide-react";
-import { requireTenant } from "@/lib/tenant";
+import { requireTenant, getSessionUser } from "@/lib/tenant";
 import { ProductForm } from "@/components/products/ProductForm";
 import { Button } from "@/components/ui/button";
 
 export const dynamic = "force-dynamic";
 
 export default async function NewProductPage() {
+  const sessionUser = await getSessionUser();
+  if (sessionUser?.role === "CASHIER") {
+    redirect("/billing/new");
+  }
+
   const tenant = await requireTenant();
 
   return (

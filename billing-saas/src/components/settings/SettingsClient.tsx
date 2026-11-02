@@ -16,12 +16,30 @@ import {
   Building,
   Eye,
   EyeOff,
+  Users,
+  ShieldCheck,
+  UserPlus,
+  Trash2,
+  UserCheck,
+  Ban,
+  Shield,
 } from "lucide-react";
 import QRCode from "react-qr-code";
 import { toast } from "sonner";
 import { useLanguage } from "@/lib/language-context";
 import { Language } from "@/lib/translations";
 import { Button } from "@/components/ui/button";
+
+export interface StaffUserItem {
+  id: string;
+  name: string;
+  mobile: string;
+  email?: string | null;
+  role: string;
+  isActive: boolean;
+  lastLoginAt?: string | null;
+  createdAt: string;
+}
 
 interface SettingsClientProps {
   tenant: any;
@@ -30,6 +48,7 @@ interface SettingsClientProps {
   isRazorpayConfigured?: boolean;
   razorpayKeyId?: string;
   initialTab?: string;
+  initialStaff?: StaffUserItem[];
 }
 
 export function SettingsClient({
@@ -39,6 +58,7 @@ export function SettingsClient({
   isRazorpayConfigured,
   razorpayKeyId,
   initialTab = "payment",
+  initialStaff = [],
 }: SettingsClientProps) {
   const [activeTab, setActiveTab] = useState<string>(initialTab);
   const { language, setLanguage, t } = useLanguage();
@@ -50,6 +70,16 @@ export function SettingsClient({
   const [upiId, setUpiId] = useState<string>(setting?.upiId || "");
   const [bankName, setBankName] = useState<string>(setting?.bankName || "");
   const [isSavingPayment, setIsSavingPayment] = useState(false);
+
+  // Staff management state (Task 1)
+  const [staffList, setStaffList] = useState<StaffUserItem[]>(initialStaff);
+  const [staffName, setStaffName] = useState("");
+  const [staffMobile, setStaffMobile] = useState("");
+  const [staffEmail, setStaffEmail] = useState("");
+  const [staffPassword, setStaffPassword] = useState("");
+  const [showStaffPassword, setShowStaffPassword] = useState(false);
+  const [isSavingStaff, setIsSavingStaff] = useState(false);
+  const [isDeletingStaffId, setIsDeletingStaffId] = useState<string | null>(null);
 
   // Language settings state
   const [selectedLang, setSelectedLang] = useState<Language>(
@@ -68,12 +98,95 @@ export function SettingsClient({
   const [gstNo, setGstNo] = useState<string>(tenant?.gstNo || "");
   const [isSavingProfile, setIsSavingProfile] = useState(false);
 
-  // 3 Essential Tabs: Payment, Language, Shop Profile & Security
+  // 4 Essential Tabs: Payment, Staff Management, Language, Shop Profile & Security
   const tabs = [
     { id: "payment", label: t("paymentSettings", "Payment Settings"), icon: QrCode, highlightBadge: "Dynamic QR" },
+    { id: "staff", label: t("staffManagement", "Staff Management"), icon: Users, highlightBadge: "Cashier" },
     { id: "language", label: t("languageSettings", "Language"), icon: Globe },
     { id: "profile", label: t("shopProfile", "Shop Profile"), icon: Store },
   ];
+
+  async function handleCreateStaff(e: React.FormEvent) {
+    e.preventDefault();
+    if (!staffName.trim()) {
+      toast.error("Please enter the employee's name");
+      return;
+    }
+    const cleanMobile = staffMobile.replace(/\D/g, "");
+    if (cleanMobile.length < 10) {
+      toast.error("Please enter a valid 10-digit mobile number for login");
+      return;
+    }
+    if (!staffPassword || staffPassword.length < 4) {
+      toast.error("Password must be at least 4 characters long");
+      return;
+    }
+
+    setIsSavingStaff(true);
+    try {
+      const res = await fetch("/api/staff", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: staffName.trim(),
+          mobile: cleanMobile,
+          email: staffEmail.trim() || undefined,
+          password: staffPassword,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to create staff member");
+      }
+
+      toast.success(data.message || "Employee login created successfully!");
+      if (data.employee) {
+        setStaffList((prev) => [
+          ...prev,
+          {
+            ...data.employee,
+            createdAt: new Date().toISOString(),
+            lastLoginAt: null,
+          },
+        ]);
+      }
+
+      // Reset form
+      setStaffName("");
+      setStaffMobile("");
+      setStaffEmail("");
+      setStaffPassword("");
+    } catch (err: any) {
+      toast.error(err.message || "Error creating employee account");
+    } finally {
+      setIsSavingStaff(false);
+    }
+  }
+
+  async function handleDeleteStaff(id: string, name: string) {
+    if (!confirm(`Are you sure you want to delete employee "${name}"? They will no longer be able to log in.`)) {
+      return;
+    }
+
+    setIsDeletingStaffId(id);
+    try {
+      const res = await fetch(`/api/staff/${id}`, {
+        method: "DELETE",
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to delete staff member");
+      }
+
+      toast.success(`Employee "${name}" deleted successfully`);
+      setStaffList((prev) => prev.filter((s) => s.id !== id));
+    } catch (err: any) {
+      toast.error(err.message || "Could not delete staff");
+    } finally {
+      setIsDeletingStaffId(null);
+    }
+  }
 
   async function handleSavePayment(e: React.FormEvent) {
     e.preventDefault();
@@ -294,7 +407,249 @@ export function SettingsClient({
           </div>
         )}
 
-        {/* 2. LANGUAGE SETTINGS */}
+        {/* 2. STAFF MANAGEMENT (Task 1) */}
+        {activeTab === "staff" && (
+          <div className="bg-white rounded-xl border border-slate-200 p-5 sm:p-6 shadow-sm space-y-6">
+            <div className="pb-3 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                  <Users className="h-5 w-5 text-purple-600" />
+                  <span>{t("staffManagement", "Staff Management & Employee Logins")}</span>
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Create and manage separate cashier credentials. Employees have restricted billing-only access.
+                </p>
+              </div>
+              <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-800 border border-amber-200 flex items-center gap-1.5 self-start sm:self-auto shrink-0">
+                <ShieldCheck className="h-3.5 w-3.5 text-amber-600" /> Cashier Access
+              </span>
+            </div>
+
+            {/* Permission Policy Overview Box */}
+            <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-2 text-xs">
+              <span className="font-bold text-slate-900 block uppercase tracking-wider text-[10px]">
+                Employee Role Permissions Policy (Role: CASHIER)
+              </span>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 pt-1">
+                <div className="p-2.5 rounded-lg bg-emerald-50/70 border border-emerald-200/90 text-emerald-900 space-y-1">
+                  <p className="font-bold flex items-center gap-1.5 text-emerald-800">
+                    <Check className="h-3.5 w-3.5" /> Allowed Actions
+                  </p>
+                  <ul className="list-disc list-inside space-y-0.5 text-[11px] text-emerald-800">
+                    <li>Create Bills &amp; Print Invoices (/billing/new)</li>
+                    <li>View Invoices &amp; Print past receipts (/invoices)</li>
+                    <li>Create Sales Returns &amp; Credit Notes (/returns)</li>
+                    <li>View Udhari customer ledgers (/udhari)</li>
+                    <li>View Customers list (/customers)</li>
+                  </ul>
+                </div>
+
+                <div className="p-2.5 rounded-lg bg-red-50/70 border border-red-200/90 text-red-900 space-y-1">
+                  <p className="font-bold flex items-center gap-1.5 text-red-800">
+                    <Ban className="h-3.5 w-3.5" /> Restricted (Hidden &amp; Blocked)
+                  </p>
+                  <ul className="list-disc list-inside space-y-0.5 text-[11px] text-red-800">
+                    <li>Cannot access Dashboard &amp; Profit/Loss metrics</li>
+                    <li>Cannot view or record Expenses (/expenses)</li>
+                    <li>Cannot edit Products or change costs (/products)</li>
+                    <li>Cannot delete invoices (Delete button is hidden)</li>
+                    <li>Cannot access Shop Settings or Staff management</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+
+            {/* Form to Add New Employee */}
+            <div className="p-5 rounded-xl border border-purple-200 bg-purple-50/20 space-y-4">
+              <div className="flex items-center gap-2">
+                <UserPlus className="h-4 w-4 text-purple-700" />
+                <h3 className="text-sm font-bold text-slate-900">Add New Employee Account</h3>
+              </div>
+
+              <form onSubmit={handleCreateStaff} className="space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {/* Name */}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Employee Name <span className="text-red-500 font-bold">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. Ramesh Kumar"
+                      value={staffName}
+                      onChange={(e) => setStaffName(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-xs sm:text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    />
+                  </div>
+
+                  {/* Mobile (Used for login) */}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Login Mobile Number <span className="text-red-500 font-bold">*</span>
+                    </label>
+                    <input
+                      type="tel"
+                      required
+                      maxLength={10}
+                      placeholder="10-digit mobile, e.g. 9876543210"
+                      value={staffMobile}
+                      onChange={(e) => setStaffMobile(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white font-mono text-xs sm:text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    />
+                    <p className="text-[10px] text-slate-500 mt-0.5">Used as login username on /login</p>
+                  </div>
+
+                  {/* Email */}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Email Address (Optional)
+                    </label>
+                    <input
+                      type="email"
+                      placeholder="e.g. ramesh@store.com"
+                      value={staffEmail}
+                      onChange={(e) => setStaffEmail(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-xs sm:text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    />
+                  </div>
+
+                  {/* Password */}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Login Password <span className="text-red-500 font-bold">*</span>
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showStaffPassword ? "text" : "password"}
+                        required
+                        minLength={4}
+                        placeholder="Set employee password"
+                        value={staffPassword}
+                        onChange={(e) => setStaffPassword(e.target.value)}
+                        className="w-full pl-3 pr-10 py-2 rounded-lg border border-slate-300 bg-white font-mono text-xs sm:text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowStaffPassword(!showStaffPassword)}
+                        tabIndex={-1}
+                        className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600 transition"
+                      >
+                        {showStaffPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-slate-500 mt-0.5">Min 4 characters</p>
+                  </div>
+                </div>
+
+                <div className="flex justify-end pt-1">
+                  <Button
+                    type="submit"
+                    disabled={isSavingStaff}
+                    className="bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs h-9 px-4 rounded-lg flex items-center gap-2 shadow-sm"
+                  >
+                    {isSavingStaff ? (
+                      <>
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" /> Saving...
+                      </>
+                    ) : (
+                      <>
+                        <UserPlus className="h-3.5 w-3.5" /> Create Employee Login
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </form>
+            </div>
+
+            {/* Existing Staff Members List */}
+            <div className="space-y-3 pt-2">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                  Registered Staff Accounts ({staffList.length})
+                </h3>
+              </div>
+
+              {staffList.length === 0 ? (
+                <div className="p-8 text-center border border-dashed border-slate-200 rounded-xl text-xs text-slate-400">
+                  No staff members created yet. Use the form above to add your first employee.
+                </div>
+              ) : (
+                <div className="divide-y divide-slate-100 rounded-xl border border-slate-200 overflow-hidden">
+                  {staffList.map((staff) => {
+                    const isOwner = staff.role === "OWNER";
+                    return (
+                      <div
+                        key={staff.id}
+                        className="p-3.5 sm:p-4 bg-white flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-slate-50/60 transition"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div
+                            className={`h-9 w-9 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 ${
+                              isOwner
+                                ? "bg-purple-100 text-purple-700 border border-purple-200"
+                                : "bg-amber-100 text-amber-800 border border-amber-200"
+                            }`}
+                          >
+                            {staff.name ? staff.name.charAt(0).toUpperCase() : "U"}
+                          </div>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-bold text-xs sm:text-sm text-slate-900 truncate">
+                                {staff.name}
+                              </span>
+                              <span
+                                className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${
+                                  isOwner
+                                    ? "bg-purple-100 text-purple-800 border border-purple-200"
+                                    : "bg-amber-100 text-amber-800 border border-amber-200"
+                                }`}
+                              >
+                                {isOwner ? "Owner (Full Admin)" : "Cashier (Billing Only)"}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-slate-500 mt-0.5 font-mono">
+                              Mobile: <strong className="text-slate-700">{staff.mobile}</strong>
+                              {staff.email ? ` • ${staff.email}` : ""}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-3 self-end sm:self-auto shrink-0">
+                          <span className="text-[10px] text-slate-400">
+                            {staff.lastLoginAt
+                              ? `Last active: ${new Date(staff.lastLoginAt).toLocaleDateString([], { month: "short", day: "numeric" })}`
+                              : "Never logged in"}
+                          </span>
+
+                          {!isOwner && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              disabled={isDeletingStaffId === staff.id}
+                              onClick={() => handleDeleteStaff(staff.id, staff.name)}
+                              className="h-8 text-[11px] text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200 gap-1"
+                            >
+                              {isDeletingStaffId === staff.id ? (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              ) : (
+                                <Trash2 className="h-3 w-3" />
+                              )}
+                              <span>Remove</span>
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* 3. LANGUAGE SETTINGS */}
         {activeTab === "language" && (
           <div className="bg-white rounded-xl border border-slate-200 p-5 sm:p-6 shadow-sm space-y-6">
             <div className="pb-3 border-b border-slate-200">

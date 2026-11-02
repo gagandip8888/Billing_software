@@ -2,7 +2,7 @@ import React, { Suspense } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, Edit3, Printer, Ticket, MessageCircle } from "lucide-react";
-import { requireTenant } from "@/lib/tenant";
+import { requireTenant, getSessionUser } from "@/lib/tenant";
 import { prisma } from "@/lib/prisma";
 import { serializeInvoice } from "@/lib/invoice-utils";
 import { InvoicePrint } from "@/components/invoices/InvoicePrint";
@@ -25,6 +25,8 @@ export const dynamic = "force-dynamic";
 
 export default async function ViewInvoicePage({ params, searchParams }: ViewInvoicePageProps) {
   const tenant = await requireTenant();
+  const sessionUser = await getSessionUser();
+  const isCashier = sessionUser?.role === "CASHIER";
   const { id } = params;
 
   const invoice = await prisma.invoice.findFirst({
@@ -157,11 +159,13 @@ export default async function ViewInvoicePage({ params, searchParams }: ViewInvo
             customerMobile={customerMobile}
           />
 
-          <DeleteInvoiceButton
-            invoiceId={serialized.id}
-            invoiceNo={serialized.invoiceNo}
-            redirectOnSuccess={true}
-          />
+          {!isCashier && (
+            <DeleteInvoiceButton
+              invoiceId={serialized.id}
+              invoiceNo={serialized.invoiceNo}
+              redirectOnSuccess={true}
+            />
+          )}
         </div>
       </div>
 

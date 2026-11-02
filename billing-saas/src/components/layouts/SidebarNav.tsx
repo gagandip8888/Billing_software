@@ -16,6 +16,7 @@ import {
   LucideIcon,
 } from "lucide-react";
 import { useLanguage } from "@/lib/language-context";
+import { useSession } from "next-auth/react";
 
 export interface NavItemConfig {
   label: string;
@@ -28,11 +29,16 @@ export interface NavItemConfig {
 interface SidebarNavProps {
   udhariTotal?: number;
   onNavigate?: () => void;
+  userRole?: string;
 }
 
-export function SidebarNav({ udhariTotal = 0, onNavigate }: SidebarNavProps) {
+export function SidebarNav({ udhariTotal = 0, onNavigate, userRole }: SidebarNavProps) {
   const pathname = usePathname();
+  const { data: session } = useSession();
   const { t } = useLanguage();
+
+  const effectiveRole = userRole || (session?.user as any)?.role || "OWNER";
+  const isCashier = effectiveRole === "CASHIER";
 
   const navItems: NavItemConfig[] = [
     {
@@ -84,6 +90,22 @@ export function SidebarNav({ udhariTotal = 0, onNavigate }: SidebarNavProps) {
     },
   ];
 
+  // Filter navigation items based on role (Task 2)
+  // CASHIER / Employee ONLY sees: Billing, Invoices, Udhari, Returns, Customers
+  // CASHIER MUST NOT see: Dashboard, Expenses, Products, Settings
+  const visibleNavItems = navItems.filter((item) => {
+    if (isCashier) {
+      return (
+        item.href === "/billing/new" ||
+        item.href === "/invoices" ||
+        item.href === "/udhari" ||
+        item.href === "/returns" ||
+        item.href === "/customers"
+      );
+    }
+    return true;
+  });
+
   const isRouteActive = (href: string) => {
     if (!pathname) return false;
     if (href === "/dashboard") {
@@ -97,7 +119,7 @@ export function SidebarNav({ udhariTotal = 0, onNavigate }: SidebarNavProps) {
 
   return (
     <nav className="p-3 space-y-1.5" aria-label="Sidebar Navigation">
-      {navItems.map((item) => {
+      {visibleNavItems.map((item) => {
         const Icon = item.icon;
         const active = isRouteActive(item.href);
 

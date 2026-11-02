@@ -225,19 +225,22 @@ export function TopNavbar({
           </button>
 
           {/* Brand Logo & Name */}
-          <div className="flex items-center gap-2.5">
-            <div className="h-8 w-8 rounded-lg bg-[#7C3AED] flex items-center justify-center text-white shadow-sm shrink-0">
+          <Link
+            href={userRole === "CASHIER" ? "/billing/new" : "/dashboard"}
+            className="flex items-center gap-2.5 group"
+          >
+            <div className="h-8 w-8 rounded-lg bg-[#7C3AED] flex items-center justify-center text-white shadow-sm shrink-0 group-hover:scale-105 transition">
               <Store className="h-4 w-4" />
             </div>
             <div className="min-w-0">
-              <span className="font-bold text-sm block truncate max-w-[130px] sm:max-w-[200px] text-slate-900">
+              <span className="font-bold text-sm block truncate max-w-[130px] sm:max-w-[200px] text-slate-900 group-hover:text-purple-700 transition">
                 {businessName}
               </span>
               <span className="text-[10px] text-slate-500 block capitalize leading-none">
-                {shopType.toLowerCase()}
+                {userRole === "CASHIER" ? "Staff Terminal" : shopType.toLowerCase()}
               </span>
             </div>
-          </div>
+          </Link>
         </div>
 
         {/* Center: Clean Search Bar */}
@@ -500,23 +503,32 @@ export function TopNavbar({
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56 p-1.5 shadow-xl border-slate-200 bg-white">
               <DropdownMenuLabel className="px-2 py-1.5">
-                <p className="text-xs font-bold text-slate-900">{userName}</p>
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-bold text-slate-900">{userName}</p>
+                  <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider ${
+                    userRole === "CASHIER" ? "bg-amber-100 text-amber-800" : "bg-purple-100 text-purple-800"
+                  }`}>
+                    {userRole === "CASHIER" ? "Cashier" : "Owner"}
+                  </span>
+                </div>
                 <p className="text-[10px] text-slate-500 truncate">{businessName}</p>
                 {userMobile && (
                   <p className="text-[10px] font-mono text-slate-400 mt-0.5">{userMobile}</p>
                 )}
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
-              <DropdownMenuItem asChild>
-                <Link
-                  href="/settings"
-                  prefetch={true}
-                  className="flex items-center gap-2 px-2 py-1.5 text-xs text-slate-700 hover:text-slate-900 cursor-pointer rounded-md"
-                >
-                  <Settings className="h-3.5 w-3.5 text-slate-500" />
-                  <span>Settings & Profile</span>
-                </Link>
-              </DropdownMenuItem>
+              {userRole !== "CASHIER" && (
+                <DropdownMenuItem asChild>
+                  <Link
+                    href="/settings"
+                    prefetch={true}
+                    className="flex items-center gap-2 px-2 py-1.5 text-xs text-slate-700 hover:text-slate-900 cursor-pointer rounded-md"
+                  >
+                    <Settings className="h-3.5 w-3.5 text-slate-500" />
+                    <span>Settings & Profile</span>
+                  </Link>
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem asChild>
                 <Link
                   href="/billing/new"
@@ -554,15 +566,21 @@ export function TopNavbar({
             <div>
               {/* Header */}
               <div className="p-4 border-b border-slate-800 flex items-center justify-between">
-                <div className="flex items-center gap-3">
+                <Link
+                  href={userRole === "CASHIER" ? "/billing/new" : "/dashboard"}
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="flex items-center gap-3"
+                >
                   <div className="h-9 w-9 rounded-xl bg-[#7C3AED] flex items-center justify-center text-white shadow-sm">
                     <Store className="h-5 w-5" />
                   </div>
                   <div className="min-w-0">
                     <p className="font-bold text-sm text-white truncate max-w-[140px]">{businessName}</p>
-                    <span className="text-[10px] text-purple-300 capitalize">{shopType.toLowerCase()}</span>
+                    <span className="text-[10px] text-purple-300 capitalize">
+                      {userRole === "CASHIER" ? "Cashier Terminal" : shopType.toLowerCase()}
+                    </span>
                   </div>
-                </div>
+                </Link>
                 <button
                   type="button"
                   onClick={() => setMobileMenuOpen(false)}
@@ -572,19 +590,23 @@ export function TopNavbar({
                 </button>
               </div>
 
-              {/* Navigation */}
-              <SidebarNav onNavigate={() => setMobileMenuOpen(false)} />
+              {/* Navigation with role filtering */}
+              <SidebarNav userRole={userRole} onNavigate={() => setMobileMenuOpen(false)} />
             </div>
 
             {/* Footer */}
             <div className="p-4 border-t border-slate-800 space-y-2">
               <div className="flex items-center gap-2.5 px-2 py-1.5">
-                <div className="h-7 w-7 rounded-full bg-[#7C3AED] flex items-center justify-center text-white text-xs font-bold">
+                <div className={`h-7 w-7 rounded-full flex items-center justify-center text-xs font-bold ${
+                  userRole === "CASHIER" ? "bg-amber-500 text-slate-950" : "bg-[#7C3AED] text-white"
+                }`}>
                   {userInitials}
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="text-xs font-semibold text-white truncate">{userName}</p>
-                  <p className="text-[10px] text-slate-400 truncate">{userMobile}</p>
+                  <p className="text-[10px] text-slate-400 truncate">
+                    {userRole === "CASHIER" ? "Staff / Cashier" : "Store Owner"} {userMobile ? `• ${userMobile}` : ""}
+                  </p>
                 </div>
               </div>
               <button

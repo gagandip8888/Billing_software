@@ -1,5 +1,5 @@
 import React, { Suspense } from "react";
-import { requireTenant } from "@/lib/tenant";
+import { requireTenant, getSessionUser } from "@/lib/tenant";
 import { prisma } from "@/lib/prisma";
 import { serializeInvoice } from "@/lib/invoice-utils";
 import { InvoiceTable } from "@/components/invoices/InvoiceTable";
@@ -11,6 +11,7 @@ export const dynamic = "force-dynamic";
 
 async function InvoicesContent() {
   const tenant = await requireTenant();
+  const sessionUser = await getSessionUser();
 
   // Fetch all invoices for tenant to calculate metrics
   const invoices = await prisma.invoice.findMany({
@@ -142,6 +143,7 @@ async function InvoicesContent() {
       <InvoiceTable
         initialInvoices={serializedInvoices}
         businessName={tenant.businessName}
+        userRole={sessionUser?.role || "OWNER"}
       />
     </div>
   );

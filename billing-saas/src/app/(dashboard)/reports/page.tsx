@@ -1,5 +1,6 @@
 import React from "react";
-import { requireTenant } from "@/lib/tenant";
+import { redirect } from "next/navigation";
+import { requireTenant, getSessionUser } from "@/lib/tenant";
 import { getDateRange, DateRangePreset } from "@/lib/date-range";
 import { generateReportsData } from "@/lib/reports";
 import { ReportsClient } from "@/components/reports/ReportsClient";
@@ -15,6 +16,11 @@ export default async function ReportsPage({
     to?: string;
   };
 }) {
+  const sessionUser = await getSessionUser();
+  if (sessionUser?.role === "CASHIER") {
+    redirect("/billing/new");
+  }
+
   const tenant = await requireTenant();
 
   const preset = (searchParams?.preset || "thisMonth") as DateRangePreset;

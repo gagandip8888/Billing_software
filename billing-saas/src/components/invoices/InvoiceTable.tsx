@@ -89,13 +89,16 @@ export interface SerializedInvoice {
 interface InvoiceTableProps {
   initialInvoices: SerializedInvoice[];
   businessName: string;
+  userRole?: string;
 }
 
 export function InvoiceTable({
   initialInvoices,
   businessName,
+  userRole = "OWNER",
 }: InvoiceTableProps) {
   const router = useRouter();
+  const isCashier = userRole === "CASHIER";
   const [invoices, setInvoices] = useState<SerializedInvoice[]>(initialInvoices);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
@@ -491,23 +494,27 @@ export function InvoiceTable({
                             </a>
                           </DropdownMenuItem>
 
-                          <DropdownMenuSeparator />
-                          {inv.status !== InvoiceStatus.CANCELLED && (
-                            <DropdownMenuItem
-                              onClick={() => setCancellingInvoice(inv)}
-                              className="text-xs text-amber-700 focus:text-amber-800 focus:bg-amber-50 cursor-pointer"
-                            >
-                              <Ban className="h-3.5 w-3.5 mr-2" />
-                              Cancel Invoice
-                            </DropdownMenuItem>
+                          {!isCashier && (
+                            <>
+                              <DropdownMenuSeparator />
+                              {inv.status !== InvoiceStatus.CANCELLED && (
+                                <DropdownMenuItem
+                                  onClick={() => setCancellingInvoice(inv)}
+                                  className="text-xs text-amber-700 focus:text-amber-800 focus:bg-amber-50 cursor-pointer"
+                                >
+                                  <Ban className="h-3.5 w-3.5 mr-2" />
+                                  Cancel Invoice
+                                </DropdownMenuItem>
+                              )}
+                              <DropdownMenuItem
+                                onClick={() => setDeletingInvoice(inv)}
+                                className="text-xs text-red-600 focus:text-red-700 focus:bg-red-50 cursor-pointer font-medium"
+                              >
+                                <Trash2 className="h-3.5 w-3.5 mr-2" />
+                                Delete Permanently
+                              </DropdownMenuItem>
+                            </>
                           )}
-                          <DropdownMenuItem
-                            onClick={() => setDeletingInvoice(inv)}
-                            className="text-xs text-red-600 focus:text-red-700 focus:bg-red-50 cursor-pointer font-medium"
-                          >
-                            <Trash2 className="h-3.5 w-3.5 mr-2" />
-                            Delete Permanently
-                          </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </div>

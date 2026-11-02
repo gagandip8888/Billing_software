@@ -1,5 +1,6 @@
 import React, { Suspense } from "react";
-import { requireTenant } from "@/lib/tenant";
+import { redirect } from "next/navigation";
+import { requireTenant, getSessionUser } from "@/lib/tenant";
 import { prisma } from "@/lib/prisma";
 import { ProductsView } from "@/components/products/ProductsView";
 import { serializeProduct } from "@/lib/products";
@@ -8,6 +9,13 @@ import ProductsLoading from "./loading";
 export const dynamic = "force-dynamic";
 
 async function ProductsContent() {
+  const sessionUser = await getSessionUser();
+
+  // Strict Permission Guard: Cashiers cannot access product catalog management or edit products
+  if (sessionUser?.role === "CASHIER") {
+    redirect("/billing/new");
+  }
+
   const tenant = await requireTenant();
 
   const products = await prisma.product.findMany({
