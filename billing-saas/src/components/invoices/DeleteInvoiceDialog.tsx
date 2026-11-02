@@ -90,6 +90,7 @@ export function DeleteInvoiceDialog({
           "Content-Type": "application/json",
           "x-delete-password": password.trim(),
         },
+        body: JSON.stringify({ password: password.trim() }),
       });
 
       const data = await res.json();
@@ -97,10 +98,11 @@ export function DeleteInvoiceDialog({
       if (!res.ok) {
         const errorText = data.error || "Incorrect password. Cannot delete bill.";
         setErrorMsg(errorText);
-        throw new Error(errorText);
+        toast.error(errorText);
+        return;
       }
 
-      toast.success("Bill deleted successfully");
+      toast.success("Bill deleted successfully. Stock restored to inventory.");
       onOpenChange(false);
 
       if (typeof window !== "undefined") {

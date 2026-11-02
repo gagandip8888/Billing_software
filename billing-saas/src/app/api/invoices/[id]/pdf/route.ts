@@ -139,8 +139,12 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
       </div>
       <div>
         <div class="section-label">Invoice Details</div>
-        <div style="font-size: 11px; color: #475569;">Status: <strong style="color: ${invoice.status === 'PAID' ? '#059669' : '#dc2626'};">${invoice.status}</strong></div>
-        <div style="font-size: 11px; color: #475569;">Balance Due: <strong>₹${Number(invoice.balanceAmount).toFixed(2)}</strong></div>
+        ${Number(invoice.balanceAmount) > 0 ? `
+        <div style="font-size: 11px; color: #475569;">Status: <strong style="color: #dc2626; font-weight: 700;">BALANCE DUE</strong></div>
+        <div style="font-size: 11px; color: #475569;">Balance Due: <strong style="color: #dc2626; font-weight: 700;">₹${Number(invoice.balanceAmount).toFixed(2)}</strong></div>
+        ` : `
+        <div style="font-size: 11px; color: #475569;">Status: <strong style="color: #059669; font-weight: 700;">PAID</strong></div>
+        `}
       </div>
     </div>
 

@@ -14,9 +14,10 @@ async function DashboardData() {
   const todayEnd = endOfDay(now);
   const last7Start = startOfDay(subDays(now, 6));
   const currentMonthStart = startOfMonth(now);
+  const past30DaysStart = startOfDay(subDays(now, 29));
 
-  // Range should cover from the start of the current month OR the last 7 days, whichever is earlier
-  const queryStartDate = currentMonthStart < last7Start ? currentMonthStart : last7Start;
+  // Query range covers from the start of the current month OR the last 30 days, whichever is earlier
+  const queryStartDate = currentMonthStart < past30DaysStart ? currentMonthStart : past30DaysStart;
 
   // Parallel DB queries using Promise.allSettled with targeted field selection for speed and resilience
   let rangeInvoices: any[] = [];
@@ -147,9 +148,16 @@ async function DashboardData() {
         },
         select: {
           id: true,
+          returnNo: true,
+          productName: true,
           totalAmount: true,
           refundMode: true,
           returnDate: true,
+          invoice: {
+            select: {
+              invoiceNo: true,
+            },
+          },
         },
       }),
     ]);
@@ -177,7 +185,7 @@ async function DashboardData() {
 
   // --- Filter Today's subset ---
   const todayInvoices = rangeInvoices.filter(
-    (inv) => new Date(inv.invoiceDate) >= todayStart
+    (inv) => new Date(inv.invoiceDate) >= todayStart && inv.status !== "CANCELLED"
   );
 
   const todayExpensesList = rangeExpenses.filter((exp) => {
@@ -190,13 +198,26 @@ async function DashboardData() {
     return d >= todayStart && d <= todayEnd;
   });
 
+  // Total Gross Billed Sales Today
+  const todayGrossSales = todayInvoices.reduce(
+    (sum, inv) => sum + Number(inv.totalAmount || 0),
+    0
+  );
+
+  // Total Returns Today
+  const todayReturnsTotal = todayReturnsList.reduce(
+    (sum, ret) => sum + Number(ret.totalAmount || 0),
+    0
+  );
+
+  // Today's Net Sales = (Today's Billed Sales - Today's Returns)
+  const todaySale = Math.max(0, Math.round((todayGrossSales - todayReturnsTotal) * 100) / 100);
+
   // Today's Sales Breakdown (Cash vs Online UPI/Card)
   let todayCashSales = 0;
   let todayOnlineSales = 0;
 
   for (const inv of todayInvoices) {
-    if (inv.status === "CANCELLED") continue;
-
     const payments = Array.isArray(inv.payments) ? (inv.payments as any[]) : null;
 
     if (payments && payments.length > 0) {
@@ -228,12 +249,7 @@ async function DashboardData() {
     }
   }
 
-  // Adjust today's sales for returns today
-  const todayReturnsTotal = todayReturnsList.reduce(
-    (sum, ret) => sum + Number(ret.totalAmount || 0),
-    0
-  );
-
+  // Adjust today's cash/online for returns today
   for (const ret of todayReturnsList) {
     const retAmt = Number(ret.totalAmount || 0);
     if (ret.refundMode === "CASH") {
@@ -253,14 +269,13 @@ async function DashboardData() {
 
   todayCashSales = Math.round(todayCashSales * 100) / 100;
   todayOnlineSales = Math.round(todayOnlineSales * 100) / 100;
-  const todaySale = Math.max(0, Math.round((todayCashSales + todayOnlineSales) * 100) / 100);
 
   // Today's Expense (₹)
   const todayExpense = Math.round(
     todayExpensesList.reduce((sum, exp) => sum + Number(exp.amount), 0) * 100
   ) / 100;
 
-  // Today's Cost of goods sold (sum of item.costPrice * item.qty for today's invoices)
+  // Today's Cost of goods sold (sum of item.costPrice * item.qty for today's valid invoices)
   let todayCost = 0;
   for (const inv of todayInvoices) {
     for (const item of inv.items) {
@@ -437,6 +452,93 @@ async function DashboardData() {
       ),
     }));
 
+  // --- Build unified Account & Cashflow Statement (Sales: IN, Returns: OUT, Expenses: OUT) ---
+  const statementRaw: Array<{
+    id: string;
+    date: Date;
+    type: "SALE" | "RETURN" | "EXPENSE";
+    title: string;
+    reference: string;
+    flow: "IN" | "OUT";
+    amount: number;
+    paymentMode: string;
+    customerOrNote?: string;
+  }> = [];
+
+  // Invoices (Sales: IN)
+  for (const inv of rangeInvoices) {
+    if (inv.status === "CANCELLED") continue;
+    const cust = inv.customer?.name || (inv.metadata as any)?.walkInCustomerName || "Walk-in Customer";
+    statementRaw.push({
+      id: `inv-${inv.id}`,
+      date: new Date(inv.invoiceDate),
+      type: "SALE",
+      title: `Sale: Bill #${inv.invoiceNo}`,
+      reference: inv.invoiceNo,
+      flow: "IN",
+      amount: Number(inv.totalAmount || 0),
+      paymentMode: inv.paymentMode || "CASH",
+      customerOrNote: cust,
+    });
+  }
+
+  // Returns (Returns: OUT)
+  for (const ret of rangeReturns) {
+    statementRaw.push({
+      id: `ret-${ret.id}`,
+      date: new Date(ret.returnDate),
+      type: "RETURN",
+      title: `Return: #${ret.returnNo} (${ret.productName || "Goods return"})`,
+      reference: ret.returnNo,
+      flow: "OUT",
+      amount: Number(ret.totalAmount || 0),
+      paymentMode: ret.refundMode || "REFUND",
+      customerOrNote: ret.invoice?.invoiceNo ? `Against #${ret.invoice.invoiceNo}` : "Customer Refund",
+    });
+  }
+
+  // Expenses (Expenses: OUT)
+  for (const exp of rangeExpenses) {
+    statementRaw.push({
+      id: `exp-${exp.id}`,
+      date: new Date(exp.date || exp.createdAt),
+      type: "EXPENSE",
+      title: `Expense: ${exp.title}`,
+      reference: `EXP-${exp.id.slice(-4).toUpperCase()}`,
+      flow: "OUT",
+      amount: Number(exp.amount || 0),
+      paymentMode: "EXPENSE",
+      customerOrNote: exp.title,
+    });
+  }
+
+  // Chronological sort (oldest to newest) to compute running balance
+  statementRaw.sort((a, b) => a.date.getTime() - b.date.getTime());
+
+  let runningBalance = 0;
+  const statementWithBalance = statementRaw.map((tx) => {
+    if (tx.flow === "IN") {
+      runningBalance += tx.amount;
+    } else {
+      runningBalance -= tx.amount;
+    }
+    return {
+      id: tx.id,
+      date: tx.date.toISOString(),
+      type: tx.type,
+      title: tx.title,
+      reference: tx.reference,
+      flow: tx.flow,
+      amount: tx.amount,
+      paymentMode: tx.paymentMode,
+      customerOrNote: tx.customerOrNote,
+      balance: Math.round(runningBalance * 100) / 100,
+    };
+  });
+
+  // Reverse so newest appears first for statement ledger view
+  const statementEntries = [...statementWithBalance].reverse();
+
   return (
     <DashboardClient
       tenant={{
@@ -479,6 +581,7 @@ async function DashboardData() {
         createdAt: e.createdAt.toISOString(),
       }))}
       lowStockAlerts={lowStockAlerts}
+      statementEntries={statementEntries}
     />
   );
 }

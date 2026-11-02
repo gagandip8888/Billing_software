@@ -197,7 +197,19 @@ export async function DELETE(req: NextRequest, { params }: RouteParams) {
     });
 
     const configuredPassword = tenantSetting?.deletePassword?.trim();
+
+    // Check JSON body for password if present
+    let bodyPassword = "";
+    try {
+      const clonedReq = req.clone();
+      const body = await clonedReq.json();
+      if (body && typeof body.password === "string") {
+        bodyPassword = body.password.trim();
+      }
+    } catch (_) {}
+
     const reqPassword = (
+      bodyPassword ||
       req.headers.get("x-delete-password") ||
       searchParams.get("password") ||
       ""
@@ -206,7 +218,7 @@ export async function DELETE(req: NextRequest, { params }: RouteParams) {
     if (configuredPassword && configuredPassword.length > 0) {
       if (!reqPassword || reqPassword !== configuredPassword) {
         return NextResponse.json(
-          { error: "Incorrect password. Cannot delete bill." },
+          { error: "Incorrect admin password. Cannot delete bill." },
           { status: 403 }
         );
       }
@@ -225,14 +237,30 @@ export async function DELETE(req: NextRequest, { params }: RouteParams) {
         // a. Restore product stock (only if not already cancelled)
         if (existing.status !== InvoiceStatus.CANCELLED) {
           for (const item of existing.items) {
-            if (item.productId) {
+            let targetProductId = item.productId;
+            if (!targetProductId && (item.metadata as any)?.inputProductId) {
+              const p = await tx.product.findFirst({
+                where: {
+                  tenantId: tenant.id,
+                  OR: [
+                    { productId: (item.metadata as any).inputProductId },
+                    { barcode: (item.metadata as any).inputProductId },
+                    { name: { equals: item.name, mode: "insensitive" } },
+                  ],
+                },
+                select: { id: true },
+              });
+              if (p) targetProductId = p.id;
+            }
+
+            if (targetProductId) {
               try {
                 await tx.product.update({
-                  where: { id: item.productId, tenantId: tenant.id },
+                  where: { id: targetProductId, tenantId: tenant.id },
                   data: { stockQty: { increment: item.qty } },
                 });
               } catch (e) {
-                console.warn(`Could not restore stock for product ${item.productId}:`, e);
+                console.warn(`Could not restore stock for product ${targetProductId}:`, e);
               }
             }
           }

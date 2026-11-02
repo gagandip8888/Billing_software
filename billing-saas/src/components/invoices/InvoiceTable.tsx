@@ -18,6 +18,7 @@ import {
   Trash2,
   WifiOff,
   RefreshCw,
+  RotateCcw,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useOfflineSync } from "@/hooks/use-offline-sync";
@@ -81,6 +82,8 @@ export interface SerializedInvoice {
     email?: string | null;
   } | null;
   items?: any[];
+  hasReturn?: boolean;
+  salesReturns?: Array<{ id: string; returnNo: string; totalAmount?: number }>;
 }
 
 interface InvoiceTableProps {
@@ -384,12 +387,24 @@ export function InvoiceTable({
                   >
                     {/* Invoice No */}
                     <TableCell className="font-mono font-bold text-xs text-blue-600">
-                      <Link
-                        href={`/invoices/${inv.id}`}
-                        className="hover:underline flex items-center gap-1"
-                      >
-                        {inv.invoiceNo}
-                      </Link>
+                      <div className="flex flex-col gap-1 items-start">
+                        <Link
+                          href={`/invoices/${inv.id}`}
+                          className="hover:underline flex items-center gap-1"
+                        >
+                          {inv.invoiceNo}
+                        </Link>
+                        {(inv.hasReturn || (inv.salesReturns && inv.salesReturns.length > 0)) && (
+                          <Badge
+                            variant="outline"
+                            className="text-[9px] px-1.5 py-0 font-bold bg-amber-50 text-amber-800 border-amber-300 flex items-center gap-1 tracking-tight"
+                            title="Sales return recorded for this bill"
+                          >
+                            <RotateCcw className="h-2.5 w-2.5 text-amber-600" />
+                            RETURNED
+                          </Badge>
+                        )}
+                      </div>
                     </TableCell>
 
                     {/* Date */}

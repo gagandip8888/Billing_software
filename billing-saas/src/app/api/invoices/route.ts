@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireTenant } from "@/lib/tenant";
+import { InvoiceStatus } from "@prisma/client";
 import { invoiceSchema } from "@/lib/validations/invoice";
 import { checkCanCreateBill } from "@/lib/subscription";
 import {
@@ -30,7 +31,15 @@ export async function GET(req: NextRequest) {
     };
 
     if (status && status !== "ALL") {
-      where.status = status;
+      if (status === "UNPAID") {
+        where.OR = [
+          { status: InvoiceStatus.UNPAID },
+          { status: InvoiceStatus.PARTIAL },
+          { balanceAmount: { gt: 0 } },
+        ];
+      } else {
+        where.status = status;
+      }
     }
 
     if (fromDate || toDate) {
@@ -67,6 +76,13 @@ export async function GET(req: NextRequest) {
           },
         },
         items: true,
+        salesReturns: {
+          select: {
+            id: true,
+            returnNo: true,
+            totalAmount: true,
+          },
+        },
       },
       orderBy: { invoiceDate: "desc" },
       skip,

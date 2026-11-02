@@ -27,6 +27,13 @@ async function InvoicesContent() {
         },
       },
       items: true,
+      salesReturns: {
+        select: {
+          id: true,
+          returnNo: true,
+          totalAmount: true,
+        },
+      },
     },
     orderBy: {
       invoiceDate: "desc",

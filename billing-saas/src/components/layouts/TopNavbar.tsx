@@ -18,10 +18,15 @@ import {
   Loader2,
   Bell,
   AlertTriangle,
+  Plus,
 } from "lucide-react";
 import { signOut } from "next-auth/react";
 import { SidebarNav } from "./SidebarNav";
 import { useLanguage } from "@/lib/language-context";
+import {
+  AddStockModal,
+  LowStockProductItem,
+} from "@/components/products/AddStockModal";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -70,9 +75,9 @@ export function TopNavbar({
   const searchContainerRef = useRef<HTMLDivElement>(null);
 
   // Low stock notification state (includes specific productId)
-  const [lowStockItems, setLowStockItems] = useState<
-    Array<{ id: string; productId?: string | null; name: string; stockQty: number; lowStockAlert: number }>
-  >([]);
+  const [lowStockItems, setLowStockItems] = useState<LowStockProductItem[]>([]);
+  const [selectedRestockProduct, setSelectedRestockProduct] = useState<LowStockProductItem | null>(null);
+  const [isRestockOpen, setIsRestockOpen] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -413,23 +418,35 @@ export function TopNavbar({
                   </div>
                 ) : (
                   lowStockItems.map((item) => (
-                    <Link
+                    <div
                       key={item.id}
-                      href="/products?filter=low_stock"
-                      className="flex items-center justify-between px-3 py-2.5 rounded-lg hover:bg-amber-50/80 transition group text-xs"
+                      onClick={() => {
+                        setSelectedRestockProduct(item);
+                        setIsRestockOpen(true);
+                      }}
+                      className="cursor-pointer flex items-center justify-between px-3 py-2.5 rounded-lg hover:bg-amber-50/90 transition group text-xs"
+                      title="Click to view details and replenish stock"
                     >
                       <div className="min-w-0 pr-2">
-                        <p className="font-semibold text-slate-800 group-hover:text-amber-900 truncate flex items-center gap-1.5">
+                        <p className="font-semibold text-slate-800 group-hover:text-amber-950 truncate flex items-center gap-1.5">
                           <span>{item.name} - <strong className="text-red-600 font-bold">{item.stockQty} left</strong></span>
                         </p>
                         <p className="text-[10px] text-slate-400 mt-0.5">
-                          Alert threshold: ≤ {item.lowStockAlert} units {item.productId ? `• ID: ${item.productId}` : ""}
+                          Alert limit: ≤ {item.lowStockAlert} units {item.productId ? `• ID: ${item.productId}` : ""}
                         </p>
                       </div>
-                      <span className="shrink-0 text-[11px] font-mono font-bold text-red-600 bg-red-50 border border-red-200 px-2 py-0.5 rounded shadow-2xs">
-                        {item.stockQty} left
-                      </span>
-                    </Link>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedRestockProduct(item);
+                          setIsRestockOpen(true);
+                        }}
+                        className="shrink-0 text-[10px] font-bold text-amber-800 bg-amber-100 hover:bg-amber-200 border border-amber-300 px-2 py-1 rounded-md flex items-center gap-1 shadow-2xs transition"
+                      >
+                        <Plus className="h-3 w-3" /> Add Stock
+                      </button>
+                    </div>
                   ))
                 )}
               </div>
@@ -446,6 +463,20 @@ export function TopNavbar({
               )}
             </DropdownMenuContent>
           </DropdownMenu>
+
+          {/* Dedicated Low Stock Restock Modal */}
+          <AddStockModal
+            open={isRestockOpen}
+            onOpenChange={setIsRestockOpen}
+            product={selectedRestockProduct}
+            onSuccess={(updated) => {
+              setLowStockItems((prev) =>
+                prev
+                  .map((p) => (p.id === updated.id ? updated : p))
+                  .filter((p) => Number(p.stockQty) <= Number(p.lowStockAlert))
+              );
+            }}
+          />
 
           {/* User Avatar & Menu */}
           <DropdownMenu>

@@ -14,12 +14,24 @@ import {
   ArrowRight,
   TrendingUp,
   Tag,
+  Receipt,
+  Printer,
+  MessageCircle,
+  Check,
+  ExternalLink,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 import {
   Select,
   SelectContent,
@@ -89,7 +101,28 @@ interface PastReturn {
   }>;
 }
 
+export interface ReturnReceiptData {
+  returnNo: string;
+  returnDate: string;
+  originalInvoiceNo: string;
+  customerName: string;
+  customerMobile?: string;
+  items: Array<{
+    name: string;
+    qty: number;
+    price: number;
+    total: number;
+  }>;
+  refundMode: string;
+  creditNoteNo?: string | null;
+  totalAmount: number;
+  reason?: string;
+}
+
 export default function ReturnsPage() {
+  // Return receipt view modal state
+  const [activeReturnReceipt, setActiveReturnReceipt] = useState<ReturnReceiptData | null>(null);
+
   // Search state
   const [productIdInput, setProductIdInput] = useState("");
   const [isSearchingProduct, setIsSearchingProduct] = useState(false);
@@ -219,6 +252,27 @@ export default function ReturnsPage() {
       if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("products:updated"));
       }
+
+      // Open Return Bill / Credit Note receipt modal
+      setActiveReturnReceipt({
+        returnNo: data.salesReturn?.returnNo || "RET-NEW",
+        returnDate: new Date().toISOString(),
+        originalInvoiceNo: selectedInvoice.invoiceNo,
+        customerName: selectedInvoice.customer?.name || "Walk-in Customer",
+        customerMobile: selectedInvoice.customer?.mobile || "",
+        items: [
+          {
+            name: selectedInvoice.productName,
+            qty: returnQty,
+            price: selectedInvoice.price,
+            total: returnQty * selectedInvoice.price,
+          },
+        ],
+        refundMode: refundMode === "CREDIT" ? "CREDIT_NOTE" : refundMode,
+        creditNoteNo: data.creditNote?.creditNoteNo || null,
+        totalAmount: returnQty * selectedInvoice.price,
+        reason: returnReason,
+      });
 
       // Reset form
       setProductIdInput("");
@@ -579,6 +633,7 @@ export default function ReturnsPage() {
                   <TableHead className="text-xs font-bold text-slate-700">Reason</TableHead>
                   <TableHead className="text-xs font-bold text-slate-700">Refund</TableHead>
                   <TableHead className="text-right text-xs font-bold text-slate-700">Amount</TableHead>
+                  <TableHead className="text-right text-xs font-bold text-slate-700">Receipt</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -635,6 +690,29 @@ export default function ReturnsPage() {
                     <TableCell className="text-right font-mono text-xs font-bold text-slate-900">
                       ₹{r.totalAmount.toFixed(2)}
                     </TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() =>
+                          setActiveReturnReceipt({
+                            returnNo: r.returnNo,
+                            returnDate: r.returnDate,
+                            originalInvoiceNo: r.invoice.invoiceNo,
+                            customerName: r.invoice.customer?.name || "Walk-in Customer",
+                            customerMobile: r.invoice.customer?.mobile || "",
+                            items: r.items,
+                            refundMode: r.refundMode,
+                            creditNoteNo: r.creditNoteId ? "CN-CREDIT" : undefined,
+                            totalAmount: r.totalAmount,
+                            reason: r.reason || undefined,
+                          })
+                        }
+                        className="h-7 text-xs border-indigo-200 text-indigo-700 hover:bg-indigo-50 font-semibold gap-1"
+                      >
+                        <Receipt className="h-3 w-3" /> View Bill
+                      </Button>
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -642,6 +720,153 @@ export default function ReturnsPage() {
           </div>
         )}
       </div>
+
+      {/* 4. RETURN BILL / CREDIT NOTE RECEIPT MODAL */}
+      <Dialog
+        open={Boolean(activeReturnReceipt)}
+        onOpenChange={(open) => !open && setActiveReturnReceipt(null)}
+      >
+        <DialogContent className="max-w-md p-6 bg-white text-slate-900 border-slate-200">
+          <DialogHeader className="text-left space-y-1">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-200">
+              <span className="text-xs font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-purple-100 text-purple-800 border border-purple-200">
+                {activeReturnReceipt?.refundMode === "CREDIT_NOTE" || activeReturnReceipt?.refundMode === "CREDIT"
+                  ? "STORE CREDIT NOTE"
+                  : "RETURN BILL RECEIPT"}
+              </span>
+              <span className="font-mono text-xs font-bold text-slate-500">
+                #{activeReturnReceipt?.returnNo}
+              </span>
+            </div>
+            <DialogTitle className="text-lg font-bold text-slate-900 pt-1">
+              Sales Return Document
+            </DialogTitle>
+            <DialogDescription className="text-xs text-slate-500">
+              Official return voucher for customer reference and records
+            </DialogDescription>
+          </DialogHeader>
+
+          {activeReturnReceipt && (
+            <div className="space-y-4 text-xs my-2">
+              {/* Reference & Customer */}
+              <div className="grid grid-cols-2 gap-3 p-3 bg-slate-50 rounded-xl border border-slate-200">
+                <div>
+                  <span className="text-[10px] font-bold uppercase text-slate-400 block">Customer</span>
+                  <div className="font-bold text-slate-900">{activeReturnReceipt.customerName}</div>
+                  {activeReturnReceipt.customerMobile && (
+                    <div className="text-[11px] text-slate-500">{activeReturnReceipt.customerMobile}</div>
+                  )}
+                </div>
+                <div className="text-right">
+                  <span className="text-[10px] font-bold uppercase text-slate-400 block">Original Invoice</span>
+                  <div className="font-mono font-bold text-indigo-700">#{activeReturnReceipt.originalInvoiceNo}</div>
+                  <div className="text-[11px] text-slate-500">
+                    {new Date(activeReturnReceipt.returnDate).toLocaleDateString("en-IN", {
+                      day: "numeric",
+                      month: "short",
+                      year: "numeric",
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              {/* Items List */}
+              <div className="border border-slate-200 rounded-xl overflow-hidden">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead className="bg-slate-50 border-b border-slate-200 text-[10px] font-bold uppercase text-slate-500">
+                    <tr>
+                      <th className="py-2 px-3">Item</th>
+                      <th className="py-2 px-3 text-center">Qty</th>
+                      <th className="py-2 px-3 text-right">Price</th>
+                      <th className="py-2 px-3 text-right">Refund</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {activeReturnReceipt.items.map((it, idx) => (
+                      <tr key={idx}>
+                        <td className="py-2 px-3 font-semibold text-slate-800">{it.name}</td>
+                        <td className="py-2 px-3 text-center">{it.qty}</td>
+                        <td className="py-2 px-3 text-right font-mono">₹{it.price.toFixed(2)}</td>
+                        <td className="py-2 px-3 text-right font-mono font-bold text-slate-900">
+                          ₹{it.total.toFixed(2)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Total & Refund Mode */}
+              <div className="space-y-2 p-3 bg-purple-50/60 border border-purple-200 rounded-xl">
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-purple-900 font-semibold">Refund Mode:</span>
+                  <Badge
+                    variant="outline"
+                    className="font-bold text-[11px] bg-white text-purple-800 border-purple-300"
+                  >
+                    {activeReturnReceipt.refundMode === "CREDIT_NOTE" || activeReturnReceipt.refundMode === "CREDIT"
+                      ? "Store Credit Note"
+                      : activeReturnReceipt.refundMode}
+                  </Badge>
+                </div>
+
+                {activeReturnReceipt.creditNoteNo && (
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="text-purple-700">Credit Note No:</span>
+                    <span className="font-mono font-bold text-purple-900">
+                      {activeReturnReceipt.creditNoteNo}
+                    </span>
+                  </div>
+                )}
+
+                <div className="flex justify-between items-baseline pt-2 border-t border-purple-200">
+                  <span className="text-sm font-bold text-purple-950">Total Refund Amount:</span>
+                  <span className="text-xl font-black font-mono text-purple-700">
+                    ₹{activeReturnReceipt.totalAmount.toFixed(2)}
+                  </span>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center gap-2 pt-2">
+                <Button
+                  type="button"
+                  onClick={() => window.print()}
+                  variant="outline"
+                  className="flex-1 h-9 text-xs font-bold border-slate-300 text-slate-700 gap-1.5"
+                >
+                  <Printer className="h-3.5 w-3.5" /> Print Bill
+                </Button>
+
+                {(() => {
+                  const mob = (activeReturnReceipt.customerMobile || "").replace(/\D/g, "").slice(-10);
+                  const msg = `Hi ${activeReturnReceipt.customerName}, your Return Bill #${activeReturnReceipt.returnNo} for ₹${activeReturnReceipt.totalAmount.toFixed(2)} (Returned from Invoice #${activeReturnReceipt.originalInvoiceNo}) has been processed successfully. Refund Mode: ${activeReturnReceipt.refundMode}. Thank you!`;
+                  const waUrl = mob ? `https://wa.me/91${mob}?text=${encodeURIComponent(msg)}` : `https://wa.me/?text=${encodeURIComponent(msg)}`;
+                  return (
+                    <a href={waUrl} target="_blank" rel="noopener noreferrer" className="flex-1">
+                      <Button
+                        type="button"
+                        className="w-full h-9 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5"
+                      >
+                        <MessageCircle className="h-3.5 w-3.5" /> WhatsApp
+                      </Button>
+                    </a>
+                  );
+                })()}
+
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => setActiveReturnReceipt(null)}
+                  className="h-9 text-xs"
+                >
+                  Close
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

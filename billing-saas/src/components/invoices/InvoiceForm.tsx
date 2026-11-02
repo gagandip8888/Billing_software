@@ -1256,10 +1256,15 @@ export function InvoiceForm({
                 <span className="font-bold text-emerald-700">₹{totals.paidAmount.toFixed(2)}</span>
               </div>
 
-              {totals.balanceAmount > 0 && (
-                <div className="flex justify-between text-red-600 font-bold">
-                  <span>Balance Due:</span>
-                  <span>₹{totals.balanceAmount.toFixed(2)}</span>
+              {totals.balanceAmount > 0 ? (
+                <div className="flex justify-between text-red-600 font-bold bg-red-50/80 p-2 rounded-lg border border-red-200">
+                  <span className="font-black text-red-700">BALANCE DUE:</span>
+                  <span className="font-black text-red-700 font-mono">₹{totals.balanceAmount.toFixed(2)}</span>
+                </div>
+              ) : (
+                <div className="flex justify-between text-emerald-700 font-bold bg-emerald-50/80 p-2 rounded-lg border border-emerald-200">
+                  <span className="font-black text-emerald-800">STATUS:</span>
+                  <span className="font-black text-emerald-800 tracking-wider">PAID</span>
                 </div>
               )}
             </div>

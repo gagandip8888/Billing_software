@@ -14,10 +14,19 @@ import {
   ArrowRight,
   ShieldAlert,
   Clock,
+  Plus,
 } from "lucide-react";
 import { format } from "date-fns";
 import { Badge } from "@/components/ui/badge";
 import { useLanguage } from "@/lib/language-context";
+import {
+  BusinessStatement,
+  StatementEntry,
+} from "@/components/dashboard/BusinessStatement";
+import {
+  AddStockModal,
+  LowStockProductItem,
+} from "@/components/products/AddStockModal";
 import {
   BarChart,
   Bar,
@@ -85,6 +94,7 @@ export interface DashboardClientProps {
     stockQty: number;
     lowStockAlert: number;
   }>;
+  statementEntries?: StatementEntry[];
 }
 
 export function DashboardClient({
@@ -104,9 +114,18 @@ export function DashboardClient({
   last7DaysData,
   recentBills,
   recentExpenses,
-  lowStockAlerts = [],
+  lowStockAlerts: initialLowStockAlerts = [],
+  statementEntries = [],
 }: DashboardClientProps) {
   const { t } = useLanguage();
+  const [lowStockAlerts, setLowStockAlerts] = useState(initialLowStockAlerts);
+  const [selectedRestockProduct, setSelectedRestockProduct] = useState<LowStockProductItem | null>(null);
+  const [isRestockModalOpen, setIsRestockModalOpen] = useState(false);
+
+  useEffect(() => {
+    setLowStockAlerts(initialLowStockAlerts);
+  }, [initialLowStockAlerts]);
+
   // Prevent hydration layout shift with recharts ResponsiveContainer
   const [isMounted, setIsMounted] = useState(false);
   useEffect(() => {
@@ -153,15 +172,24 @@ export function DashboardClient({
               </p>
               <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
                 {lowStockAlerts.slice(0, 3).map((item) => (
-                  <span
+                  <button
                     key={item.id}
-                    className="inline-flex items-center gap-1 text-[11px] font-medium text-red-900 bg-white/80 border border-red-200 px-2.5 py-0.5 rounded-md"
+                    type="button"
+                    onClick={() => {
+                      setSelectedRestockProduct(item);
+                      setIsRestockModalOpen(true);
+                    }}
+                    className="inline-flex items-center gap-1.5 text-[11px] font-medium text-red-900 bg-white/90 hover:bg-white border border-red-200 px-2.5 py-1 rounded-md shadow-2xs transition group text-left"
+                    title="Click to replenish stock"
                   >
                     <span className="font-semibold text-slate-900">{item.name} - <strong className="text-red-700 font-mono font-bold">{item.stockQty} left</strong></span>
                     {item.productId && (
                       <span className="font-mono text-[10px] text-slate-500 bg-slate-100 px-1 rounded border border-slate-200">ID: {item.productId}</span>
                     )}
-                  </span>
+                    <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-1 rounded flex items-center gap-0.5">
+                      <Plus className="h-2.5 w-2.5" /> Restock
+                    </span>
+                  </button>
                 ))}
                 {lowStockAlerts.length > 3 && (
                   <span className="text-[11px] font-semibold text-red-800">
@@ -171,13 +199,28 @@ export function DashboardClient({
               </div>
             </div>
           </div>
-          <Link
-            href="/products?filter=low_stock"
-            className="inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-bold text-xs rounded-lg shadow-sm transition whitespace-nowrap self-start sm:self-auto shrink-0"
-          >
-            <span>View Products</span>
-            <ArrowRight className="h-3.5 w-3.5" />
-          </Link>
+          <div className="flex items-center gap-2 self-start sm:self-auto shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                if (lowStockAlerts[0]) {
+                  setSelectedRestockProduct(lowStockAlerts[0]);
+                  setIsRestockModalOpen(true);
+                }
+              }}
+              className="inline-flex items-center justify-center gap-1 px-3 py-2 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded-lg shadow-sm transition whitespace-nowrap"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              <span>Restock Now</span>
+            </button>
+            <Link
+              href="/products?filter=low_stock"
+              className="inline-flex items-center justify-center gap-1.5 px-3 py-2 bg-red-600 hover:bg-red-700 text-white font-bold text-xs rounded-lg shadow-sm transition whitespace-nowrap"
+            >
+              <span>View All</span>
+              <ArrowRight className="h-3.5 w-3.5" />
+            </Link>
+          </div>
         </div>
       )}
 
@@ -683,6 +726,12 @@ export function DashboardClient({
         </div>
       </div>
 
+      {/* 3. Bank-Style Account & Cashflow Statement (Task 1) */}
+      <BusinessStatement
+        entries={statementEntries}
+        businessName={tenant.businessName}
+      />
+
       {/* Low Stock Alerts (Bonus inventory safety section if items are low) */}
       {lowStockAlerts.length > 0 && (
         <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-4 shadow-xs">
@@ -692,7 +741,7 @@ export function DashboardClient({
               <span>Low Stock Alerts ({lowStockAlerts.length} items need replenishment)</span>
             </div>
             <Link
-              href="/products"
+              href="/products?filter=low_stock"
               prefetch={true}
               className="text-[11px] font-semibold text-amber-800 hover:text-amber-950 flex items-center gap-1"
             >
@@ -702,17 +751,39 @@ export function DashboardClient({
           </div>
           <div className="flex flex-wrap gap-2">
             {lowStockAlerts.slice(0, 8).map((item) => (
-              <span
+              <button
                 key={item.id}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white border border-amber-200 text-xs text-slate-700 shadow-2xs"
+                type="button"
+                onClick={() => {
+                  setSelectedRestockProduct(item);
+                  setIsRestockModalOpen(true);
+                }}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white hover:bg-amber-100/80 border border-amber-200 text-xs text-slate-700 shadow-2xs transition cursor-pointer text-left"
+                title="Click to restock this product"
               >
                 <span className="font-medium truncate max-w-[150px]">{item.name}</span>
                 <span className="font-mono font-bold text-amber-700">{item.stockQty} left</span>
-              </span>
+                <Plus className="h-3 w-3 text-amber-700 ml-0.5" />
+              </button>
             ))}
           </div>
         </div>
       )}
+
+      {/* Quick Add Stock Modal for Low Stock replenishment */}
+      <AddStockModal
+        open={isRestockModalOpen}
+        onOpenChange={setIsRestockModalOpen}
+        product={selectedRestockProduct}
+        onSuccess={(updated) => {
+          // Immediately update state and filter out products whose stock now exceeds lowStockAlert
+          setLowStockAlerts((prev) =>
+            prev
+              .map((p) => (p.id === updated.id ? { ...p, stockQty: updated.stockQty } : p))
+              .filter((p) => Number(p.stockQty) <= Number(p.lowStockAlert))
+          );
+        }}
+      />
     </div>
   );
 }

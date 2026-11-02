@@ -233,6 +233,18 @@ export function serializeInvoice(invoice: any) {
           creditBalance: Number(invoice.customer.creditBalance || 0),
         }
       : null,
+    hasReturn: Boolean(
+      (invoice.salesReturns && invoice.salesReturns.length > 0) ||
+      (invoice.creditNotes && invoice.creditNotes.length > 0) ||
+      invoice.hasReturn
+    ),
+    salesReturns: invoice.salesReturns
+      ? invoice.salesReturns.map((r: any) => ({
+          id: r.id,
+          returnNo: r.returnNo,
+          totalAmount: Number(r.totalAmount || 0),
+        }))
+      : [],
   };
 }
 

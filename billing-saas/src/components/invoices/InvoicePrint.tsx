@@ -155,10 +155,13 @@ export function InvoicePrint({ invoice, tenant, autoPrint = false }: InvoicePrin
 
   // Payment Mode resolution
   const rawMode = invoice.paymentMode;
+  const hasBalanceDue = balanceAmount > 0;
+  const isPaid = balanceAmount <= 0;
   const isUdhari =
-    rawMode === "CREDIT" ||
-    invoice.status === "UNPAID" ||
-    (balanceAmount > 0 && paidAmount === 0);
+    hasBalanceDue &&
+    (rawMode === "CREDIT" ||
+      invoice.status === "UNPAID" ||
+      paidAmount === 0);
 
   let displayPaymentMode = "Cash";
   if (isUdhari) {
@@ -173,6 +176,10 @@ export function InvoicePrint({ invoice, tenant, autoPrint = false }: InvoicePrin
     displayPaymentMode = invoice.payments
       .map((p: any) => `${p.mode}: ₹${Number(p.amount).toFixed(2)}`)
       .join(", ");
+  } else if (rawMode === "CASH") {
+    displayPaymentMode = "Cash";
+  } else {
+    displayPaymentMode = rawMode || "Cash";
   }
 
   // Shop details & UPI QR Code
@@ -202,7 +209,7 @@ export function InvoicePrint({ invoice, tenant, autoPrint = false }: InvoicePrin
   )} from ${shopName} is ready.\nPayment Mode: ${displayPaymentMode}${
     displayDiscount > 0 ? `\nDiscount: ₹${displayDiscount.toFixed(2)}` : ""
   }${
-    balanceAmount > 0 ? `\nBalance Due: ₹${balanceAmount.toFixed(2)}` : ""
+    hasBalanceDue ? `\nBalance Due: ₹${balanceAmount.toFixed(2)}` : "\nStatus: PAID"
   }\nThank you! Visit again.\nView Bill: ${invoiceUrl}`;
 
   const whatsappHref = mobile10
@@ -494,10 +501,15 @@ export function InvoicePrint({ invoice, tenant, autoPrint = false }: InvoicePrin
               <span className="font-semibold text-emerald-700">₹{paidAmount.toFixed(2)}</span>
             </div>
 
-            {balanceAmount > 0 && (
-              <div className="flex justify-between text-[10px] font-bold text-red-700">
+            {hasBalanceDue ? (
+              <div className="flex justify-between text-[11px] font-black text-red-700 pt-0.5">
                 <span>BALANCE DUE:</span>
                 <span>₹{balanceAmount.toFixed(2)}</span>
+              </div>
+            ) : (
+              <div className="flex justify-between text-[10px] font-bold text-emerald-700 pt-0.5">
+                <span>STATUS:</span>
+                <span className="uppercase">PAID</span>
               </div>
             )}
           </div>
@@ -560,9 +572,20 @@ export function InvoicePrint({ invoice, tenant, autoPrint = false }: InvoicePrin
             </div>
 
             <div className="text-right space-y-1">
-              <span className="inline-block px-3 py-1 bg-purple-100 text-purple-800 font-bold text-xs rounded-full uppercase tracking-wider">
-                Tax Invoice
-              </span>
+              <div className="flex items-center gap-1.5 justify-end">
+                <span className="inline-block px-3 py-1 bg-purple-100 text-purple-800 font-bold text-xs rounded-full uppercase tracking-wider">
+                  Tax Invoice
+                </span>
+                {hasBalanceDue ? (
+                  <span className="inline-block px-2.5 py-0.5 bg-red-100 text-red-700 font-black text-[11px] rounded-full uppercase tracking-wider border border-red-200">
+                    BALANCE DUE
+                  </span>
+                ) : (
+                  <span className="inline-block px-2.5 py-0.5 bg-emerald-100 text-emerald-800 font-black text-[11px] rounded-full uppercase tracking-wider border border-emerald-200">
+                    PAID
+                  </span>
+                )}
+              </div>
               <div className="text-lg font-black font-mono text-slate-900 pt-1">
                 #{invoice.invoiceNo}
               </div>
@@ -603,9 +626,15 @@ export function InvoicePrint({ invoice, tenant, autoPrint = false }: InvoicePrin
                 </div>
                 <div>
                   Status:{" "}
-                  <strong className={isUdhari ? "text-red-600 uppercase" : "text-emerald-700 uppercase"}>
-                    {isUdhari ? "UNPAID (UDHARI)" : "PAID"}
-                  </strong>
+                  {hasBalanceDue ? (
+                    <strong className="text-red-600 uppercase font-black">
+                      BALANCE DUE (₹{balanceAmount.toFixed(2)})
+                    </strong>
+                  ) : (
+                    <strong className="text-emerald-700 uppercase font-black">
+                      PAID
+                    </strong>
+                  )}
                 </div>
               </div>
             </div>
@@ -735,10 +764,15 @@ export function InvoicePrint({ invoice, tenant, autoPrint = false }: InvoicePrin
                 <span>₹{paidAmount.toFixed(2)}</span>
               </div>
 
-              {balanceAmount > 0 && (
-                <div className="flex justify-between text-red-600 font-bold">
-                  <span>Balance Due:</span>
-                  <span>₹{balanceAmount.toFixed(2)}</span>
+              {hasBalanceDue ? (
+                <div className="flex justify-between text-red-600 font-bold border-t border-red-200 pt-1.5 bg-red-50/70 p-1.5 rounded">
+                  <span className="font-black text-red-700 uppercase">BALANCE DUE:</span>
+                  <span className="font-black text-red-700 font-mono text-sm">₹{balanceAmount.toFixed(2)}</span>
+                </div>
+              ) : (
+                <div className="flex justify-between text-emerald-700 font-bold border-t border-emerald-200 pt-1.5 bg-emerald-50/70 p-1.5 rounded">
+                  <span className="font-black text-emerald-800 uppercase">BILL STATUS:</span>
+                  <span className="font-black text-emerald-800 tracking-wide">PAID</span>
                 </div>
               )}
             </div>
