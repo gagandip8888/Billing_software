@@ -34,6 +34,11 @@ async function DashboardData() {
   let recentExpenses: any[] = [];
   let allProducts: any[] = [];
   let rangeReturns: any[] = [];
+  let totalReceivablesAgg: any = null;
+  let totalPayablesAgg: any = null;
+  let receivablesCount = 0;
+  let payablesCount = 0;
+  let staffUsers: any[] = [];
 
   try {
     const results = await Promise.allSettled([
@@ -58,11 +63,15 @@ async function DashboardData() {
           metadata: true,
           items: {
             select: {
+              productId: true,
+              name: true,
               qty: true,
               price: true,
               total: true,
               product: {
                 select: {
+                  productId: true,
+                  name: true,
                   costPrice: true,
                 },
               },
@@ -168,6 +177,39 @@ async function DashboardData() {
           },
         },
       }),
+
+      // 7. Customers with credit balances (Total Receivables)
+      prisma.customer.aggregate({
+        where: { tenantId: tenant.id, isActive: true },
+        _sum: { creditBalance: true },
+      }),
+
+      // 8. Open Credit Notes (Total Payables / Store Liabilities)
+      prisma.creditNote.aggregate({
+        where: { tenantId: tenant.id, status: "OPEN" },
+        _sum: { amount: true },
+      }),
+
+      // 9. Count of customers with positive credit balance
+      prisma.customer.count({
+        where: { tenantId: tenant.id, isActive: true, creditBalance: { gt: 0 } },
+      }),
+
+      // 10. Count of open credit notes
+      prisma.creditNote.count({
+        where: { tenantId: tenant.id, status: "OPEN" },
+      }),
+
+      // 11. Staff users for live cashier & employee attribution
+      prisma.user.findMany({
+        where: { tenantId: tenant.id },
+        select: {
+          id: true,
+          name: true,
+          employeeId: true,
+          role: true,
+        },
+      }),
     ]);
 
     if (results[0].status === "fulfilled") rangeInvoices = results[0].value;
@@ -187,9 +229,65 @@ async function DashboardData() {
 
     if (results[5].status === "fulfilled") rangeReturns = results[5].value;
     else console.warn("rangeReturns query error:", results[5].reason);
+
+    if (results[6]?.status === "fulfilled") totalReceivablesAgg = results[6].value;
+    if (results[7]?.status === "fulfilled") totalPayablesAgg = results[7].value;
+    if (results[8]?.status === "fulfilled") receivablesCount = results[8].value || 0;
+    if (results[9]?.status === "fulfilled") payablesCount = results[9].value || 0;
+    if (results[10]?.status === "fulfilled") staffUsers = results[10].value || [];
   } catch (error) {
     console.error("Dashboard queries error:", error);
   }
+
+  // Total Receivables: sum of customer credit balances, fallback to invoice balances
+  const totalReceivables = Math.max(
+    Number(totalReceivablesAgg?._sum?.creditBalance || 0),
+    rangeInvoices.reduce((sum, inv) => sum + Number(inv.balanceAmount || 0), 0)
+  );
+
+  // Total Payables: store liabilities / open credit notes to refund customers
+  const totalPayables = Number(totalPayablesAgg?._sum?.amount || 0);
+
+  // Compute Top 5 Best Selling Products by sales quantity & revenue
+  const productSalesMap = new Map<
+    string,
+    { name: string; productId: string; totalQty: number; totalRevenue: number }
+  >();
+
+  for (const inv of rangeInvoices) {
+    if (inv.status === "CANCELLED") continue;
+    for (const item of (inv.items || [])) {
+      const pid = item.productId || item.product?.productId || "";
+      const name = item.product?.name || item.name || "Product";
+      const key = pid ? `id-${pid}` : `name-${name.toLowerCase().trim()}`;
+      const qty = Number(item.qty || 0);
+      const rev = Number(item.total || Number(item.price || 0) * qty || 0);
+
+      const existing = productSalesMap.get(key);
+      if (existing) {
+        existing.totalQty += qty;
+        existing.totalRevenue += rev;
+      } else {
+        productSalesMap.set(key, {
+          name,
+          productId: pid || item.productId || "—",
+          totalQty: qty,
+          totalRevenue: rev,
+        });
+      }
+    }
+  }
+
+  const topSellingProducts = Array.from(productSalesMap.values())
+    .sort((a, b) => b.totalQty - a.totalQty)
+    .slice(0, 5)
+    .map((p, idx) => ({
+      rank: idx + 1,
+      name: p.name,
+      productId: p.productId,
+      totalQty: p.totalQty,
+      totalRevenue: Math.round(p.totalRevenue * 100) / 100,
+    }));
 
   // --- Filter Today's subset ---
   const todayInvoices = rangeInvoices.filter(
@@ -378,6 +476,55 @@ async function DashboardData() {
     }
     return sum;
   }, 0);
+
+  // --- Live Staff & Employee Sales Attribution ---
+  const staffSalesMap = new Map<
+    string,
+    {
+      name: string;
+      employeeId?: string;
+      role: string;
+      billCount: number;
+      totalSales: number;
+    }
+  >();
+
+  // Initialize registered staff accounts
+  for (const u of staffUsers) {
+    const key = u.employeeId || u.name;
+    staffSalesMap.set(key, {
+      name: u.name,
+      employeeId: u.employeeId || undefined,
+      role: u.role,
+      billCount: 0,
+      totalSales: 0,
+    });
+  }
+
+  // Aggregate today's sales across ALL employees and the owner
+  for (const inv of todayInvoices) {
+    const meta = (inv.metadata as any) || {};
+    const staffName = meta.createdByName || tenant.ownerName || "Store Owner";
+    const employeeId = meta.createdByEmployeeId || null;
+    const role = meta.createdByRole || "OWNER";
+    const key = employeeId || staffName;
+
+    const existing = staffSalesMap.get(key) || {
+      name: staffName,
+      employeeId: employeeId || undefined,
+      role,
+      billCount: 0,
+      totalSales: 0,
+    };
+
+    existing.billCount += 1;
+    existing.totalSales += Number(inv.totalAmount || 0);
+    staffSalesMap.set(key, existing);
+  }
+
+  const employeeSales = Array.from(staffSalesMap.values()).sort(
+    (a, b) => b.totalSales - a.totalSales
+  );
 
   // Mini Charts Data: Last 7 Days Sales & Profit
   const last7DaysData = [];
@@ -568,19 +715,32 @@ async function DashboardData() {
       monthExpense={monthExpense}
       todayCustomers={todayCustomers}
       todayUdhari={todayUdhari}
+      totalReceivables={totalReceivables}
+      receivablesCount={receivablesCount}
+      totalPayables={totalPayables}
+      payablesCount={payablesCount}
+      topSellingProducts={topSellingProducts}
+      totalProductsCount={allProducts.length}
       last7DaysData={last7DaysData}
-      recentBills={recentBills.map((b) => ({
-        id: b.id,
-        invoiceNo: b.invoiceNo,
-        invoiceDate: b.invoiceDate.toISOString(),
-        totalAmount: Number(b.totalAmount),
-        paidAmount: Number(b.paidAmount),
-        balanceAmount: Number(b.balanceAmount),
-        status: b.status,
-        paymentMode: b.paymentMode,
-        customerName:
-          b.customer?.name || (b.metadata as any)?.walkInCustomerName || "Walk-in Customer",
-      }))}
+      employeeSales={employeeSales}
+      recentBills={recentBills.map((b) => {
+        const meta = (b.metadata as any) || {};
+        return {
+          id: b.id,
+          invoiceNo: b.invoiceNo,
+          invoiceDate: b.invoiceDate.toISOString(),
+          totalAmount: Number(b.totalAmount),
+          paidAmount: Number(b.paidAmount),
+          balanceAmount: Number(b.balanceAmount),
+          status: b.status,
+          paymentMode: b.paymentMode,
+          customerName:
+            b.customer?.name || (b.metadata as any)?.walkInCustomerName || "Walk-in Customer",
+          createdByName: meta.createdByName || null,
+          createdByRole: meta.createdByRole || null,
+          createdByEmployeeId: meta.createdByEmployeeId || null,
+        };
+      })}
       recentExpenses={recentExpenses.map((e) => ({
         id: e.id,
         title: e.title,

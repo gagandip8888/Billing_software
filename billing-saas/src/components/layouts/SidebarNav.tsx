@@ -13,6 +13,7 @@ import {
   Package,
   Users,
   Settings,
+  BarChart3,
   LucideIcon,
 } from "lucide-react";
 import { useLanguage } from "@/lib/language-context";
@@ -82,6 +83,11 @@ export function SidebarNav({ udhariTotal = 0, onNavigate, userRole }: SidebarNav
       label: t("customers", "Customers"),
       href: "/customers",
       icon: Users,
+    },
+    {
+      label: t("reports", "Reports"),
+      href: "/reports",
+      icon: BarChart3,
     },
     {
       label: t("settings", "Settings"),

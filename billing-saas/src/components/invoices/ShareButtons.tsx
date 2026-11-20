@@ -36,9 +36,9 @@ export function ShareButtons({
   const cleanMobile = mobileDigits.length >= 10 ? `91${mobileDigits.slice(-10)}` : "";
 
   const displayName = customerName?.trim() || "Customer";
-  const whatsappMessage = `Hi ${displayName}, here is your bill from ${businessName}. Total: ₹${totalAmount.toFixed(
+  const whatsappMessage = `Hi ${displayName}, here is your bill #${invoiceNo} of ₹${totalAmount.toFixed(
     2
-  )}. View PDF: ${invoiceUrl}`;
+  )} from ${businessName}.\n\nView / Download Bill: ${invoiceUrl}\n\nThank you for your business!`;
 
   const whatsappHref = cleanMobile
     ? `https://wa.me/${cleanMobile}?text=${encodeURIComponent(whatsappMessage)}`

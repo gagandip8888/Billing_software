@@ -159,13 +159,11 @@ export default async function ViewInvoicePage({ params, searchParams }: ViewInvo
             customerMobile={customerMobile}
           />
 
-          {!isCashier && (
-            <DeleteInvoiceButton
-              invoiceId={serialized.id}
-              invoiceNo={serialized.invoiceNo}
-              redirectOnSuccess={true}
-            />
-          )}
+          <DeleteInvoiceButton
+            invoiceId={serialized.id}
+            invoiceNo={serialized.invoiceNo}
+            redirectOnSuccess={true}
+          />
         </div>
       </div>
 

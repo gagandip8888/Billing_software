@@ -7,7 +7,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { signIn } from "next-auth/react";
 import { toast } from "sonner";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   Store,
   Phone,
@@ -18,6 +18,9 @@ import {
   ArrowRight,
   Mail,
   ShieldCheck,
+  UserCheck,
+  BadgePercent,
+  CheckCircle2,
 } from "lucide-react";
 
 import { loginSchema, LoginInput } from "@/lib/validations/auth";
@@ -42,6 +45,7 @@ import {
 
 export default function LoginPage() {
   const router = useRouter();
+  const [loginMode, setLoginMode] = useState<"OWNER" | "EMPLOYEE">("OWNER");
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
@@ -54,6 +58,7 @@ export default function LoginPage() {
   const form = useForm<LoginInput>({
     resolver: zodResolver(loginSchema),
     defaultValues: {
+      identifier: "",
       mobile: "",
       password: "",
     },
@@ -62,19 +67,29 @@ export default function LoginPage() {
   async function onSubmit(data: LoginInput) {
     setIsLoading(true);
     try {
+      const loginId = (data.identifier || data.mobile || "").trim();
       const res = await signIn("credentials", {
-        mobile: data.mobile.trim(),
+        identifier: loginId,
+        mobile: loginId,
         password: data.password,
         redirect: false,
       });
 
       if (!res || res.error) {
-        toast.error("Invalid mobile number or password");
+        toast.error(
+          loginMode === "EMPLOYEE"
+            ? "Invalid Employee ID or password"
+            : "Invalid mobile number or password"
+        );
         setIsLoading(false);
         return;
       }
 
-      toast.success("Welcome back! Redirecting to billing counter...");
+      toast.success(
+        loginMode === "EMPLOYEE"
+          ? "Staff login verified! Opening billing counter..."
+          : "Welcome back! Opening billing software..."
+      );
       router.push("/billing/new");
       router.refresh();
     } catch (err: any) {
@@ -95,7 +110,7 @@ export default function LoginPage() {
       setIsSendingReset(false);
       setForgotOpen(false);
       setForgotEmail("");
-      toast.success("Password reset instructions sent to your email / registered mobile.");
+      toast.success("Password reset instructions sent to your registered email / mobile.");
     }, 1000);
   }
 
@@ -111,41 +126,107 @@ export default function LoginPage() {
         transition={{ duration: 0.4, ease: "easeOut" }}
         className="w-full max-w-[420px] z-10"
       >
-        <div className="bg-white rounded-2xl border border-slate-200/90 shadow-xl shadow-slate-200/50 p-6 sm:p-8 space-y-6">
+        <div className="bg-white rounded-2xl border border-slate-200/90 shadow-xl shadow-slate-200/50 p-6 sm:p-8 space-y-5">
           {/* Brand Header */}
-          <div className="text-center space-y-2">
+          <div className="text-center space-y-1.5">
             <div className="inline-flex items-center justify-center h-12 w-12 rounded-2xl bg-purple-600 text-white shadow-md shadow-purple-600/20 mb-1">
               <Store className="h-6 w-6" />
             </div>
-            <h1 className="text-2xl font-bold tracking-tight text-slate-900">
+            <h1 className="text-2xl font-black tracking-tight text-slate-900">
               Sign in to BillingSaaS
             </h1>
             <p className="text-xs text-slate-500">
-              Enter your credentials to access your billing counter &amp; inventory
+              High-speed counter billing &amp; store management
             </p>
+          </div>
+
+          {/* Role Mode Tabs: Owner vs Employee */}
+          <div className="flex p-1 bg-slate-100/90 rounded-xl border border-slate-200/80 select-none">
+            <button
+              type="button"
+              onClick={() => {
+                setLoginMode("OWNER");
+                form.setValue("identifier", "");
+                form.setValue("mobile", "");
+                form.clearErrors();
+              }}
+              className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-bold transition-all ${
+                loginMode === "OWNER"
+                  ? "bg-white text-purple-900 shadow-xs shadow-slate-200"
+                  : "text-slate-500 hover:text-slate-900"
+              }`}
+            >
+              <Store className={`h-3.5 w-3.5 ${loginMode === "OWNER" ? "text-purple-600" : "text-slate-400"}`} />
+              <span>Owner Login</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setLoginMode("EMPLOYEE");
+                form.setValue("identifier", "");
+                form.setValue("mobile", "");
+                form.clearErrors();
+              }}
+              className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-bold transition-all ${
+                loginMode === "EMPLOYEE"
+                  ? "bg-white text-amber-900 shadow-xs shadow-slate-200"
+                  : "text-slate-500 hover:text-slate-900"
+              }`}
+            >
+              <UserCheck className={`h-3.5 w-3.5 ${loginMode === "EMPLOYEE" ? "text-amber-600" : "text-slate-400"}`} />
+              <span>Employee Login</span>
+            </button>
+          </div>
+
+          {/* Notice banner for selected mode */}
+          <div
+            className={`p-2.5 rounded-lg text-[11px] flex items-center gap-2 border transition-all ${
+              loginMode === "EMPLOYEE"
+                ? "bg-amber-50/80 border-amber-200/80 text-amber-900"
+                : "bg-purple-50/80 border-purple-200/80 text-purple-900"
+            }`}
+          >
+            <CheckCircle2
+              className={`h-3.5 w-3.5 shrink-0 ${
+                loginMode === "EMPLOYEE" ? "text-amber-600" : "text-purple-600"
+              }`}
+            />
+            <span>
+              {loginMode === "EMPLOYEE"
+                ? "Staff Counter: Fast POS billing, returns & customer Udhari."
+                : "Store Admin: Full access to dashboard, profit reports & shop settings."}
+            </span>
           </div>
 
           {/* Form */}
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-              {/* Mobile Input */}
+              {/* Identifier / Mobile / Employee ID Input */}
               <FormField
                 control={form.control}
-                name="mobile"
+                name="identifier"
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel className="text-xs font-semibold text-slate-700">
-                      Mobile Number
+                      {loginMode === "EMPLOYEE" ? "Employee ID or Mobile Number" : "Mobile Number"}
                     </FormLabel>
                     <FormControl>
                       <div className="relative">
-                        <Phone className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                        {loginMode === "EMPLOYEE" ? (
+                          <UserCheck className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                        ) : (
+                          <Phone className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                        )}
                         <Input
-                          type="tel"
-                          maxLength={10}
-                          placeholder="10-digit registered mobile"
+                          type="text"
+                          placeholder={
+                            loginMode === "EMPLOYEE"
+                              ? "e.g. EMP-1001 or 10-digit mobile"
+                              : "10-digit registered mobile number"
+                          }
                           className="pl-10 h-10 text-xs sm:text-sm border-slate-300 focus-visible:ring-purple-600 rounded-xl"
                           {...field}
+                          value={field.value || ""}
                         />
                       </div>
                     </FormControl>
@@ -164,13 +245,15 @@ export default function LoginPage() {
                       <FormLabel className="text-xs font-semibold text-slate-700">
                         Password
                       </FormLabel>
-                      <button
-                        type="button"
-                        onClick={() => setForgotOpen(true)}
-                        className="text-xs text-purple-600 hover:text-purple-700 font-medium transition"
-                      >
-                        Forgot Password?
-                      </button>
+                      {loginMode === "OWNER" && (
+                        <button
+                          type="button"
+                          onClick={() => setForgotOpen(true)}
+                          className="text-xs text-purple-600 hover:text-purple-700 font-medium transition"
+                        >
+                          Forgot Password?
+                        </button>
+                      )}
                     </div>
                     <FormControl>
                       <div className="relative">
@@ -209,7 +292,7 @@ export default function LoginPage() {
                     onChange={(e) => setRememberMe(e.target.checked)}
                     className="h-4 w-4 rounded border-slate-300 text-purple-600 focus:ring-purple-500 cursor-pointer"
                   />
-                  <span>Remember me for 30 days</span>
+                  <span>Remember me on this POS terminal</span>
                 </label>
               </div>
 
@@ -217,16 +300,20 @@ export default function LoginPage() {
               <Button
                 type="submit"
                 disabled={isLoading}
-                className="w-full h-10 bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs sm:text-sm shadow-md shadow-slate-900/10 rounded-xl transition flex items-center justify-center gap-2"
+                className={`w-full h-10 text-white font-semibold text-xs sm:text-sm shadow-md rounded-xl transition flex items-center justify-center gap-2 ${
+                  loginMode === "EMPLOYEE"
+                    ? "bg-slate-900 hover:bg-slate-800 shadow-slate-900/10"
+                    : "bg-purple-600 hover:bg-purple-700 shadow-purple-600/20"
+                }`}
               >
                 {isLoading ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    <span>Verifying...</span>
+                    <span>Verifying {loginMode === "EMPLOYEE" ? "Employee" : "Owner"}...</span>
                   </>
                 ) : (
                   <>
-                    <span>Sign In</span>
+                    <span>{loginMode === "EMPLOYEE" ? "Sign In as Employee" : "Sign In as Owner"}</span>
                     <ArrowRight className="h-4 w-4" />
                   </>
                 )}
@@ -234,15 +321,23 @@ export default function LoginPage() {
             </form>
           </Form>
 
-          {/* Registration / Signup Footer */}
+          {/* Registration / Staff Help Footer */}
           <div className="text-center pt-2 text-xs text-slate-500 border-t border-slate-100">
-            <span>Don&apos;t have an account? </span>
-            <Link
-              href="/register"
-              className="text-purple-600 hover:text-purple-700 font-semibold underline underline-offset-2 ml-1"
-            >
-              Register your shop
-            </Link>
+            {loginMode === "OWNER" ? (
+              <>
+                <span>Don&apos;t have an account? </span>
+                <Link
+                  href="/register"
+                  className="text-purple-600 hover:text-purple-700 font-semibold underline underline-offset-2 ml-1"
+                >
+                  Register your shop
+                </Link>
+              </>
+            ) : (
+              <span className="text-[11px] text-slate-400">
+                Staff accounts are created by your Store Owner under Shop Settings.
+              </span>
+            )}
           </div>
         </div>
 

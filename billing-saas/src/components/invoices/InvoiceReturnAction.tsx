@@ -10,6 +10,8 @@ interface InvoiceReturnActionProps {
   invoice: {
     id: string;
     invoiceNo: string;
+    paymentMode?: string;
+    balanceAmount?: number;
     items: Array<{
       id: string;
       productId?: string | null;

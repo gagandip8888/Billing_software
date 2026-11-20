@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireTenant, getSessionUser } from "@/lib/tenant";
 
@@ -6,19 +7,17 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const sessionUser = await getSessionUser();
-    if (sessionUser && sessionUser.role === "CASHIER") {
-      return NextResponse.json(
-        { error: "Forbidden: Employees cannot view settings" },
-        { status: 403 }
-      );
-    }
-
     const tenant = await requireTenant();
+    const sessionUser = await getSessionUser();
+    const isCashier = sessionUser?.role === "CASHIER";
 
     let setting = await prisma.setting.findUnique({
       where: { tenantId: tenant.id },
     });
+
+    const defaultUpi = tenant.mobile
+      ? `${tenant.mobile.replace(/\D/g, "").slice(-10)}@upi`
+      : null;
 
     if (!setting) {
       setting = await prisma.setting.create({
@@ -27,11 +26,36 @@ export async function GET() {
           invoicePrefix: "INV-",
           nextInvoiceNo: 1,
           language: "en",
+          upiId: defaultUpi,
         },
+      });
+    } else if (!setting.upiId && defaultUpi) {
+      // Auto-link UPI ID if empty
+      setting = await prisma.setting.update({
+        where: { id: setting.id },
+        data: { upiId: defaultUpi },
       });
     }
 
-    return NextResponse.json({ setting });
+    // Hide sensitive deletePassword for Cashiers
+    const sanitizedSetting = isCashier
+      ? { ...setting, deletePassword: null }
+      : setting;
+
+    return NextResponse.json({
+      setting: sanitizedSetting,
+      tenant: {
+        id: tenant.id,
+        businessName: tenant.businessName,
+        shopType: tenant.shopType,
+        ownerName: tenant.ownerName,
+        mobile: tenant.mobile,
+        address: tenant.address,
+        city: tenant.city,
+        pincode: tenant.pincode,
+        gstNo: tenant.gstNo,
+      },
+    });
   } catch (error: any) {
     console.error("GET /api/settings error:", error);
     return NextResponse.json(
@@ -55,6 +79,10 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
 
     const {
+      businessName,
+      ownerName,
+      mobile,
+      shopType,
       upiId,
       preferredApp,
       bankName,
@@ -68,32 +96,81 @@ export async function POST(req: NextRequest) {
       gstEnabled,
       whatsappEnabled,
       whatsappNumber,
-      // Optional tenant profile fields
       address,
       city,
       pincode,
       gstNo,
     } = body;
 
-    // If profile fields are updated, update tenant
-    if (address !== undefined || city !== undefined || pincode !== undefined || gstNo !== undefined) {
-      await prisma.tenant.update({
+    // Validate and update tenant shop profile details
+    const tenantUpdateData: any = {};
+    if (businessName !== undefined) {
+      const cleanName = businessName.trim();
+      if (!cleanName) {
+        return NextResponse.json(
+          { error: "Shop / Business Name cannot be empty" },
+          { status: 400 }
+        );
+      }
+      tenantUpdateData.businessName = cleanName;
+    }
+
+    if (ownerName !== undefined && ownerName.trim()) {
+      tenantUpdateData.ownerName = ownerName.trim();
+    }
+
+    if (shopType !== undefined) {
+      tenantUpdateData.shopType = shopType;
+    }
+
+    if (mobile !== undefined) {
+      const cleanMobile = mobile.replace(/\D/g, "").slice(-10);
+      if (cleanMobile.length === 10 && cleanMobile !== tenant.mobile) {
+        const existingTenant = await prisma.tenant.findUnique({
+          where: { mobile: cleanMobile },
+        });
+        if (existingTenant && existingTenant.id !== tenant.id) {
+          return NextResponse.json(
+            { error: "This mobile number is already registered with another store" },
+            { status: 400 }
+          );
+        }
+        tenantUpdateData.mobile = cleanMobile;
+
+        // Also update Owner User mobile for consistent login
+        await prisma.user.updateMany({
+          where: { tenantId: tenant.id, role: "OWNER" },
+          data: { mobile: cleanMobile },
+        });
+      }
+    }
+
+    if (address !== undefined) tenantUpdateData.address = address?.trim() || null;
+    if (city !== undefined) tenantUpdateData.city = city?.trim() || null;
+    if (pincode !== undefined) tenantUpdateData.pincode = pincode?.trim() || null;
+    if (gstNo !== undefined) tenantUpdateData.gstNo = gstNo?.trim() || null;
+
+    let updatedTenant: any = tenant;
+    if (Object.keys(tenantUpdateData).length > 0) {
+      updatedTenant = await prisma.tenant.update({
         where: { id: tenant.id },
-        data: {
-          ...(address !== undefined && { address: address?.trim() || null }),
-          ...(city !== undefined && { city: city?.trim() || null }),
-          ...(pincode !== undefined && { pincode: pincode?.trim() || null }),
-          ...(gstNo !== undefined && { gstNo: gstNo?.trim() || null }),
-        },
+        data: tenantUpdateData,
+        include: { settings: true },
       });
     }
+
+    // Auto-fallback UPI ID if not set
+    const effectiveUpi =
+      upiId !== undefined
+        ? upiId?.trim() || null
+        : tenant.settings?.upiId || (updatedTenant.mobile ? `${updatedTenant.mobile.replace(/\D/g, "").slice(-10)}@upi` : null);
 
     const setting = await prisma.setting.upsert({
       where: { tenantId: tenant.id },
       create: {
         tenantId: tenant.id,
-        upiId: upiId !== undefined ? upiId?.trim() || null : null,
-        preferredApp: preferredApp !== undefined ? preferredApp?.trim() || null : null,
+        upiId: effectiveUpi,
+        preferredApp: preferredApp !== undefined ? preferredApp?.trim() || null : "PhonePe",
         bankName: bankName !== undefined ? bankName?.trim() || null : null,
         bankAccount: bankAccount !== undefined ? bankAccount?.trim() || null : null,
         bankIfsc: bankIfsc !== undefined ? bankIfsc?.trim() || null : null,
@@ -123,10 +200,22 @@ export async function POST(req: NextRequest) {
       },
     });
 
+    // Invalidate full route and layout caches across the entire application so shop name and settings update instantly
+    try {
+      revalidatePath("/", "layout");
+      revalidatePath("/billing/new");
+      revalidatePath("/invoices");
+      revalidatePath("/dashboard");
+      revalidatePath("/settings");
+    } catch (revalErr) {
+      console.warn("revalidatePath error in settings:", revalErr);
+    }
+
     return NextResponse.json({
       success: true,
       setting,
-      message: "Settings saved successfully",
+      tenant: updatedTenant,
+      message: "Shop settings & profile updated successfully",
     });
   } catch (error: any) {
     console.error("POST /api/settings error:", error);

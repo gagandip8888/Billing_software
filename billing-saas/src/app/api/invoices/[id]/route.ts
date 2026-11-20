@@ -5,6 +5,7 @@ import { auth } from "@/lib/auth";
 import { invoiceUpdateSchema } from "@/lib/validations/invoice";
 import { serializeInvoice } from "@/lib/invoice-utils";
 import { InvoiceStatus } from "@prisma/client";
+import { verifyOwnerPassword } from "@/lib/owner-auth";
 
 interface RouteParams {
   params: {
@@ -80,6 +81,25 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
     }
 
     const body = await req.json();
+
+    // Check Employee permissions: If user is CASHIER, require Owner Password authorization
+    const session = await auth();
+    const userRole = (session?.user as any)?.role || "OWNER";
+    if (userRole === "CASHIER") {
+      const ownerPwdAttempt = (
+        (body && body.ownerPassword) ||
+        req.headers.get("x-owner-password") ||
+        ""
+      ).trim();
+      const isOwnerValid = await verifyOwnerPassword(tenant.id, ownerPwdAttempt);
+      if (!isOwnerValid) {
+        return NextResponse.json(
+          { error: "Forbidden: Owner Password authorization is required for employees to edit or cancel bills" },
+          { status: 403 }
+        );
+      }
+    }
+
     const parsed = invoiceUpdateSchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json(
@@ -223,17 +243,17 @@ export async function DELETE(req: NextRequest, { params }: RouteParams) {
       ""
     ).trim();
 
-    if (configuredPassword && configuredPassword.length > 0) {
-      if (!reqPassword || reqPassword !== configuredPassword) {
+    // Owner Password Protection for Deletion:
+    // If the caller is an employee/cashier, or if a delete password is set in store settings,
+    // require verification against the owner password or delete password.
+    const isEmployee = userRole && userRole !== "OWNER";
+    const needsPassword = isEmployee || Boolean(configuredPassword && configuredPassword.length > 0);
+
+    if (needsPassword) {
+      const isValid = await verifyOwnerPassword(tenant.id, reqPassword);
+      if (!isValid) {
         return NextResponse.json(
-          { error: "Incorrect admin password. Cannot delete bill." },
-          { status: 403 }
-        );
-      }
-    } else if (isPermanent) {
-      if (userRole && userRole !== "OWNER") {
-        return NextResponse.json(
-          { error: "Forbidden: Only shop owners can delete invoices or set a Delete Password in Settings" },
+          { error: "Incorrect Owner Password. Only the store owner can authorize deleting a bill." },
           { status: 403 }
         );
       }

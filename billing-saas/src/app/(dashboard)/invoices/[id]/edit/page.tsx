@@ -1,10 +1,11 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { ArrowLeft, Edit3 } from "lucide-react";
-import { requireTenant } from "@/lib/tenant";
+import { requireTenant, getSessionUser } from "@/lib/tenant";
 import { prisma } from "@/lib/prisma";
 import { serializeInvoice } from "@/lib/invoice-utils";
 import { InvoiceForm } from "@/components/invoices/InvoiceForm";
+import { CashierEditAuthGuard } from "@/components/invoices/CashierEditAuthGuard";
 import { Button } from "@/components/ui/button";
 import { InvoiceStatus } from "@prisma/client";
 
@@ -18,6 +19,8 @@ export const dynamic = "force-dynamic";
 
 export default async function EditInvoicePage({ params }: EditInvoicePageProps) {
   const tenant = await requireTenant();
+  const sessionUser = await getSessionUser();
+  const isCashier = sessionUser?.role === "CASHIER";
   const { id } = params;
 
   const [invoice, customers, products] = await Promise.all([
@@ -96,12 +99,18 @@ export default async function EditInvoicePage({ params }: EditInvoicePageProps) 
         </div>
       </div>
 
-      <InvoiceForm
-        initialData={serializedInvoice}
-        shopType={tenant.shopType}
-        initialCustomers={serializedCustomers}
-        initialProducts={serializedProducts}
-      />
+      <CashierEditAuthGuard
+        isCashier={isCashier}
+        invoiceId={serializedInvoice.id}
+        invoiceNo={serializedInvoice.invoiceNo}
+      >
+        <InvoiceForm
+          initialData={serializedInvoice}
+          shopType={tenant.shopType}
+          initialCustomers={serializedCustomers}
+          initialProducts={serializedProducts}
+        />
+      </CashierEditAuthGuard>
     </div>
   );
 }

@@ -10,18 +10,38 @@ export const dynamic = "force-dynamic";
 async function BillingContent() {
   const tenant = await requireTenant();
 
-  const [tenantWithSettings, customers, products, subscription] = await Promise.all([
-    prisma.tenant.findUnique({
-      where: { id: tenant.id },
-      include: { settings: true },
-    }),
+  const [customers, products, subscription] = await Promise.all([
     prisma.customer.findMany({
       where: { tenantId: tenant.id, isActive: true },
+      select: {
+        id: true,
+        name: true,
+        mobile: true,
+        email: true,
+        address: true,
+        gstNo: true,
+      },
       orderBy: { name: "asc" },
       take: 200,
     }),
     prisma.product.findMany({
       where: { tenantId: tenant.id, isActive: true },
+      select: {
+        id: true,
+        productId: true,
+        name: true,
+        price: true,
+        taxRate: true,
+        unit: true,
+        stockQty: true,
+        category: true,
+        size: true,
+        color: true,
+        brand: true,
+        mrp: true,
+        barcode: true,
+        variantGroupId: true,
+      },
       orderBy: { name: "asc" },
       take: 500,
     }),
@@ -54,6 +74,10 @@ async function BillingContent() {
     variantGroupId: p.variantGroupId,
   }));
 
+  const effectiveUpiId =
+    tenant.settings?.upiId ||
+    (tenant.mobile ? `${tenant.mobile.replace(/\D/g, "").slice(-10)}@upi` : "");
+
   return (
     <div className="max-w-6xl mx-auto space-y-5">
       {/* Clean Billing Header */}
@@ -73,8 +97,8 @@ async function BillingContent() {
         initialProducts={serializedProducts}
         subscription={subscription}
         shopInfo={{
-          shopName: tenantWithSettings?.businessName || tenant.businessName || "Store",
-          upiId: tenantWithSettings?.settings?.upiId || "",
+          shopName: tenant.businessName || "Store",
+          upiId: effectiveUpiId,
         }}
       />
     </div>

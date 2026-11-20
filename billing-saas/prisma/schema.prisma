@@ -130,6 +130,7 @@ model User {
   name         String
   mobile       String
   email        String?
+  employeeId   String?
   passwordHash String
   role         Role      @default(OWNER)
   isActive     Boolean   @default(true)
@@ -139,6 +140,7 @@ model User {
 
   @@unique([tenantId, mobile])
   @@index([tenantId])
+  @@index([tenantId, employeeId])
   @@map("users")
 }
 
@@ -397,6 +399,7 @@ model SalesReturn {
   items        SalesReturnItem[]
 
   @@unique([tenantId, returnNo])
+  @@index([tenantId, returnDate])
   @@map("sales_returns")
 }
 

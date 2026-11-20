@@ -10,6 +10,7 @@ declare module "next-auth" {
     shopType: ShopType;
     businessName: string;
     mobile: string;
+    employeeId?: string | null;
   }
 
   interface Session {
@@ -21,6 +22,7 @@ declare module "next-auth" {
       shopType: ShopType;
       businessName: string;
       mobile: string;
+      employeeId?: string | null;
     } & DefaultSession["user"];
   }
 }
@@ -33,5 +35,6 @@ declare module "next-auth/jwt" {
     shopType: ShopType;
     businessName: string;
     mobile: string;
+    employeeId?: string | null;
   }
 }

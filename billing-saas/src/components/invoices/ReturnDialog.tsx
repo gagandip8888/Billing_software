@@ -29,6 +29,8 @@ interface ReturnDialogProps {
   invoice: {
     id: string;
     invoiceNo: string;
+    paymentMode?: string;
+    balanceAmount?: number;
     items: Array<{
       id: string;
       productId?: string | null;
@@ -58,9 +60,10 @@ export function ReturnDialog({
 
   // Reset state when invoice opens
   React.useEffect(() => {
+    const isCreditBill = invoice?.paymentMode === "CREDIT" || (Number(invoice?.balanceAmount) || 0) > 0;
     if (invoice) {
       setReturnQtys({});
-      setRefundMode("CREDIT_NOTE");
+      setRefundMode(isCreditBill ? "UDHARI_DEDUCTION" : "CREDIT_NOTE");
       setReason("WRONG_SIZE");
       setCustomReason("");
     }
@@ -120,6 +123,8 @@ export function ReturnDialog({
         body: JSON.stringify({
           invoiceId: invoice!.id,
           itemsToReturn: itemsToReturn.map((it) => ({
+            id: it.id,
+            invoiceItemId: it.id,
             productId: it.productId,
             name: it.name,
             qty: it.qty,
@@ -241,6 +246,11 @@ export function ReturnDialog({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
+                    {(invoice.paymentMode === "CREDIT" || (Number(invoice.balanceAmount) || 0) > 0) && (
+                      <SelectItem value="UDHARI_DEDUCTION">
+                        Deduct from Customer Udhari (Khata)
+                      </SelectItem>
+                    )}
                     <SelectItem value="CREDIT_NOTE">
                       Credit Note (Store Credit / Voucher)
                     </SelectItem>

@@ -74,9 +74,9 @@ export function DeleteInvoiceDialog({
   async function handleDelete() {
     if (isDeleting) return;
 
-    if (hasConfiguredPassword && !password.trim()) {
-      setErrorMsg("Please enter the Admin Password to delete this bill.");
-      toast.error("Please enter the Admin Password to delete this bill.");
+    if (!password.trim()) {
+      setErrorMsg("Please enter the Store Owner Password to authorize this deletion.");
+      toast.error("Please enter the Store Owner Password to authorize this deletion.");
       return;
     }
 
@@ -96,7 +96,7 @@ export function DeleteInvoiceDialog({
       const data = await res.json();
 
       if (!res.ok) {
-        const errorText = data.error || "Incorrect password. Cannot delete bill.";
+        const errorText = data.error || "Incorrect Owner Password. Cannot delete bill.";
         setErrorMsg(errorText);
         toast.error(errorText);
         return;
@@ -108,6 +108,11 @@ export function DeleteInvoiceDialog({
       if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("products:updated"));
         window.dispatchEvent(new CustomEvent("billingsaas:bill-saved"));
+        try {
+          const channel = new BroadcastChannel("billingsaas_live_updates");
+          channel.postMessage({ type: "BILL_DELETED", invoiceId, timestamp: Date.now() });
+          channel.close();
+        } catch {}
       }
 
       if (onSuccess) {
@@ -135,7 +140,7 @@ export function DeleteInvoiceDialog({
           </div>
 
           <AlertDialogTitle className="text-lg font-bold text-slate-900">
-            {t("deleteBillModalTitle", "Enter Admin Password to delete this bill")}
+            Owner Authorization Required
           </AlertDialogTitle>
 
           <AlertDialogDescription className="text-xs text-slate-600 leading-relaxed space-y-2">
@@ -148,80 +153,50 @@ export function DeleteInvoiceDialog({
           </AlertDialogDescription>
         </AlertDialogHeader>
 
-        {isCheckingSettings ? (
-          <div className="py-6 flex items-center justify-center gap-2 text-xs text-slate-500">
-            <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
-            <span>Verifying security settings...</span>
-          </div>
-        ) : (
-          <div className="space-y-3 my-2">
-            {hasConfiguredPassword === false ? (
-              <div className="bg-amber-50/80 border border-amber-200/90 rounded-lg p-3 text-xs text-amber-800 space-y-1.5">
-                <div className="font-semibold flex items-center gap-1.5 text-amber-900">
-                  <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
-                  <span>No Password Protection Configured</span>
-                </div>
-                <p className="text-[11px] text-amber-700 leading-relaxed">
-                  {t(
-                    "noPasswordWarning",
-                    "No password set. Anyone can delete bills. Please set one in Settings."
-                  )}
-                </p>
-                <div className="pt-1">
-                  <a
-                    href="/settings?tab=profile"
-                    className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-900 underline hover:text-amber-950"
-                  >
-                    Set Delete Password in Settings &rarr;
-                  </a>
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
-                  <KeyRound className="h-3.5 w-3.5 text-slate-500" />
-                  <span>{t("enterPassword", "Enter Admin Password")}:</span>
-                </label>
-                <div className="relative">
-                  <Input
-                    type={showPassword ? "text" : "password"}
-                    value={password}
-                    onChange={(e) => {
-                      setPassword(e.target.value);
-                      if (errorMsg) setErrorMsg(null);
-                    }}
-                    placeholder="Enter admin password..."
-                    disabled={isDeleting}
-                    className={`h-10 text-xs pr-10 border-slate-300 focus-visible:ring-red-500 ${
-                      errorMsg ? "border-red-500 bg-red-50/40" : ""
-                    }`}
-                    autoComplete="off"
-                    autoFocus
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && password.trim()) {
-                        handleDelete();
-                      }
-                    }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    tabIndex={-1}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
-                  >
-                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
-                </div>
-                {errorMsg && (
-                  <p className="text-[11px] text-red-600 font-medium">{errorMsg}</p>
-                )}
-                <p className="text-[11px] text-slate-500">
-                  Password configured in Settings &gt; Shop Profile.
-                </p>
-              </div>
+        <div className="space-y-3 my-2">
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+              <KeyRound className="h-3.5 w-3.5 text-slate-500" />
+              <span>Enter Store Owner Password:</span>
+            </label>
+            <div className="relative">
+              <Input
+                type={showPassword ? "text" : "password"}
+                value={password}
+                onChange={(e) => {
+                  setPassword(e.target.value);
+                  if (errorMsg) setErrorMsg(null);
+                }}
+                placeholder="Enter owner password or admin PIN..."
+                disabled={isDeleting}
+                className={`h-10 text-xs pr-10 border-slate-300 focus-visible:ring-red-500 ${
+                  errorMsg ? "border-red-500 bg-red-50/40" : ""
+                }`}
+                autoComplete="off"
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && password.trim()) {
+                    handleDelete();
+                  }
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                tabIndex={-1}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
+              >
+                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
+            {errorMsg && (
+              <p className="text-[11px] text-red-600 font-medium">{errorMsg}</p>
             )}
+            <p className="text-[11px] text-slate-500">
+              Only the store owner password authorizes deleting invoices.
+            </p>
           </div>
-        )}
+        </div>
 
         <AlertDialogFooter className="gap-2 sm:gap-0 mt-3">
           <AlertDialogCancel

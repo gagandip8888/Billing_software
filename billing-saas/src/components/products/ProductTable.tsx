@@ -2,6 +2,7 @@
 
 import React, { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
 import {
   MoreVertical,
   Edit,
@@ -89,6 +90,8 @@ export function ProductTable({
   onEditProduct,
 }: ProductTableProps) {
   const router = useRouter();
+  const { data: session } = useSession();
+  const isCashier = (session?.user as any)?.role === "CASHIER";
   const [products, setProducts] = useState<SerializedProduct[]>(initialProducts);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [deletingProduct, setDeletingProduct] = useState<SerializedProduct | null>(null);
@@ -332,7 +335,7 @@ export function ProductTable({
   return (
     <div className="space-y-4">
       {/* BULK ACTION BAR */}
-      {selectedIds.size > 0 && (
+      {selectedIds.size > 0 && !isCashier && (
         <div className="flex items-center justify-between p-3.5 bg-red-50/90 border border-red-200 rounded-xl shadow-xs transition-all">
           <div className="flex items-center gap-2.5 text-xs font-bold text-red-900">
             <span className="flex h-2.5 w-2.5 rounded-full bg-red-600 animate-pulse" />
@@ -685,14 +688,18 @@ export function ProductTable({
                               <Edit className="h-3.5 w-3.5 mr-2 text-slate-500" />
                               Edit
                             </DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem
-                              onClick={() => setDeletingProduct(product)}
-                              className="text-xs text-red-600 focus:text-red-700 focus:bg-red-50 cursor-pointer"
-                            >
-                              <Trash2 className="h-3.5 w-3.5 mr-2" />
-                              Delete
-                            </DropdownMenuItem>
+                            {!isCashier && (
+                              <>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  onClick={() => setDeletingProduct(product)}
+                                  className="text-xs text-red-600 focus:text-red-700 focus:bg-red-50 cursor-pointer"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5 mr-2" />
+                                  Delete
+                                </DropdownMenuItem>
+                              </>
+                            )}
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </TableCell>
@@ -781,14 +788,16 @@ export function ProductTable({
                               >
                                 <Edit className="h-3 w-3" />
                               </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => setDeletingProduct(v)}
-                                className="h-7 w-7 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
-                              >
-                                <Trash2 className="h-3 w-3" />
-                              </Button>
+                              {!isCashier && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => setDeletingProduct(v)}
+                                  className="h-7 w-7 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                </Button>
+                              )}
                             </div>
                           </TableCell>
                         </TableRow>

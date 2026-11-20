@@ -25,6 +25,7 @@ export async function GET(req: NextRequest) {
         name: true,
         mobile: true,
         email: true,
+        employeeId: true,
         role: true,
         isActive: true,
         lastLoginAt: true,
@@ -61,7 +62,7 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { name, mobile, email, password } = body;
+    const { name, mobile, email, password, employeeId } = body;
 
     // Validation
     if (!name || typeof name !== "string" || !name.trim()) {
@@ -93,6 +94,24 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Determine or generate unique Employee ID
+    let finalEmpId: string;
+    if (employeeId && typeof employeeId === "string" && employeeId.trim()) {
+      finalEmpId = employeeId.trim().toUpperCase();
+      const existingWithEmpId = await prisma.user.findFirst({
+        where: { tenantId: tenant.id, employeeId: finalEmpId },
+      });
+      if (existingWithEmpId) {
+        return NextResponse.json(
+          { error: `Employee ID "${finalEmpId}" is already assigned to another staff member.` },
+          { status: 409 }
+        );
+      }
+    } else {
+      const staffCount = await prisma.user.count({ where: { tenantId: tenant.id } });
+      finalEmpId = `EMP-${1000 + staffCount + 1}`;
+    }
+
     // Check if user with this mobile already exists in this tenant
     const existing = await prisma.user.findFirst({
       where: {
@@ -118,6 +137,7 @@ export async function POST(req: NextRequest) {
         name: name.trim(),
         mobile: cleanMobile,
         email: email && typeof email === "string" && email.trim() ? email.trim() : null,
+        employeeId: finalEmpId,
         passwordHash,
         role: Role.CASHIER,
         isActive: true,
@@ -127,6 +147,7 @@ export async function POST(req: NextRequest) {
         name: true,
         mobile: true,
         email: true,
+        employeeId: true,
         role: true,
         isActive: true,
         createdAt: true,
@@ -135,7 +156,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      message: `Employee "${newEmployee.name}" created successfully with CASHIER permissions.`,
+      message: `Employee "${newEmployee.name}" (ID: ${newEmployee.employeeId}) created successfully with CASHIER permissions.`,
       employee: newEmployee,
     });
   } catch (error: any) {

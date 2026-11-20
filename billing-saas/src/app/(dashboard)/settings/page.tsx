@@ -2,8 +2,6 @@ import React from "react";
 import { redirect } from "next/navigation";
 import { requireTenant, getSessionUser } from "@/lib/tenant";
 import { prisma } from "@/lib/prisma";
-import { getTenantSubscription } from "@/lib/subscription";
-import { isRazorpayConfigured, getRazorpayKeyId } from "@/lib/razorpay";
 import { SettingsClient } from "@/components/settings/SettingsClient";
 
 export const dynamic = "force-dynamic";
@@ -21,8 +19,8 @@ export default async function SettingsPage({
   }
 
   const tenant = await requireTenant();
-  const [subscription, setting, staffUsers] = await Promise.all([
-    getTenantSubscription(tenant.id),
+  // Fast parallel queries: fetch only settings and staff list
+  const [setting, staffUsers] = await Promise.all([
     prisma.setting.findUnique({
       where: { tenantId: tenant.id },
     }),
@@ -33,6 +31,7 @@ export default async function SettingsPage({
         name: true,
         mobile: true,
         email: true,
+        employeeId: true,
         role: true,
         isActive: true,
         lastLoginAt: true,
@@ -55,16 +54,13 @@ export default async function SettingsPage({
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Shop Settings</h1>
         <p className="text-sm text-slate-500">
-          Configure UPI scanner, staff employee logins, language preferences, GSTIN, and printer formats
+          Configure UPI scanner, edit shop name and profile, manage employee logins, and print formats
         </p>
       </div>
 
       <SettingsClient
         tenant={tenant}
         setting={setting}
-        subscription={subscription}
-        isRazorpayConfigured={isRazorpayConfigured()}
-        razorpayKeyId={getRazorpayKeyId()}
         initialTab={initialTab}
         initialStaff={initialStaff}
       />

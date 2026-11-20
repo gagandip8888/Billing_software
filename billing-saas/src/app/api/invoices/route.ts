@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireTenant } from "@/lib/tenant";
-import { InvoiceStatus } from "@prisma/client";
+import { requireTenant, getSessionUser } from "@/lib/tenant";
+import { InvoiceStatus, PaymentMode } from "@prisma/client";
 import { invoiceSchema } from "@/lib/validations/invoice";
 import { checkCanCreateBill } from "@/lib/subscription";
 import {
@@ -63,6 +63,8 @@ export async function GET(req: NextRequest) {
       ];
     }
 
+    const includeItems = searchParams.get("includeItems") === "true";
+
     // Execute queries sequentially for PgBouncer connection stability
     const invoices = await prisma.invoice.findMany({
       where,
@@ -75,7 +77,7 @@ export async function GET(req: NextRequest) {
             email: true,
           },
         },
-        items: true,
+        ...(includeItems && { items: true }),
         salesReturns: {
           select: {
             id: true,
@@ -113,6 +115,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const tenant = await requireTenant();
+    const sessionUser = await getSessionUser();
     const body = await req.json();
 
     const parsed = invoiceSchema.safeParse(body);
@@ -140,11 +143,18 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const isCreditBill = data.paymentMode === PaymentMode.CREDIT;
+    let effectiveAmountPaid = data.amountPaid;
+    if (!isCreditBill && (effectiveAmountPaid === undefined || effectiveAmountPaid === null || Number(effectiveAmountPaid) === 0)) {
+      // For Cash, UPI, and Card bills, ensure default is 100% paid in full (balanceAmount = 0, status = PAID)
+      effectiveAmountPaid = undefined;
+    }
+
     // Server-side calculation of line taxes, subtotal, discount, item discounts, and totals
     const totals = calculateInvoiceTotals(
       data.items,
       data.discountAmount,
-      data.amountPaid,
+      effectiveAmountPaid,
       data.creditNoteAmount || 0
     );
 
@@ -243,6 +253,10 @@ export async function POST(req: NextRequest) {
             creditNoteAmount: data.creditNoteAmount || null,
             walkInCustomerName: !resolvedCustomerId ? data.customerName : null,
             walkInCustomerMobile: !resolvedCustomerId ? data.customerMobile : null,
+            createdById: sessionUser?.id || (sessionUser as any)?.userId || null,
+            createdByName: sessionUser?.name || "Store Owner",
+            createdByRole: sessionUser?.role || "OWNER",
+            createdByEmployeeId: (sessionUser as any)?.employeeId || null,
           },
           items: {
             create: resolvedItemsWithProduct.map((item) => ({

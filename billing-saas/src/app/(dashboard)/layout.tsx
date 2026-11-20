@@ -2,20 +2,37 @@ import React from "react";
 import Link from "next/link";
 import { Store, User as UserIcon, Home } from "lucide-react";
 import { auth } from "@/lib/auth";
-import { SidebarNav, TopNavbar, TopProgressBar } from "@/components/layouts";
+import { prisma } from "@/lib/prisma";
+import { SidebarNav, TopNavbar, TopProgressBar, MobileBottomNav } from "@/components/layouts";
 
 export default async function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  // Layout ONLY fetches user session - zero heavy DB queries for maximum speed
   const session = await auth();
-  const businessName = session?.user?.businessName || "BillingSaaS Shop";
-  const shopType = session?.user?.shopType ? session.user.shopType.replace(/_/g, " ") : "Store";
+  let businessName = session?.user?.businessName || "BillingSaaS Shop";
+  let shopType = session?.user?.shopType ? session.user.shopType.replace(/_/g, " ") : "Store";
   const userName = session?.user?.name || "Shop Admin";
   const userMobile = session?.user?.mobile || "";
   const userRole = session?.user?.role || "ADMIN";
+
+  // Query live tenant business name by primary key to ensure updated store name reflects instantly across entire UI
+  const tenantId = session?.user?.tenantId;
+  if (tenantId) {
+    try {
+      const liveTenant = await prisma.tenant.findUnique({
+        where: { id: tenantId },
+        select: { businessName: true, shopType: true },
+      });
+      if (liveTenant?.businessName) {
+        businessName = liveTenant.businessName;
+      }
+      if (liveTenant?.shopType) {
+        shopType = liveTenant.shopType.replace(/_/g, " ");
+      }
+    } catch {}
+  }
 
   return (
     <div className="h-screen flex overflow-hidden bg-slate-50 text-slate-900">
@@ -29,6 +46,7 @@ export default async function DashboardLayout({
           <div className="p-4 border-b border-slate-800">
             <Link
               href={userRole === "CASHIER" ? "/billing/new" : "/dashboard"}
+              prefetch={true}
               className="flex items-center gap-3 group"
             >
               <div className="h-10 w-10 rounded-xl bg-[#7C3AED] flex items-center justify-center text-white shadow-md shadow-purple-900/40 shrink-0 group-hover:scale-105 transition">
@@ -83,7 +101,12 @@ export default async function DashboardLayout({
         />
 
         {/* Only the main page content scrolls, preventing horizontal page overflow */}
-        <main className="p-3 sm:p-6 flex-1 overflow-y-auto overflow-x-hidden">{children}</main>
+        <main className="p-3 sm:p-6 pb-20 md:pb-6 flex-1 overflow-y-auto overflow-x-hidden">
+          {children}
+        </main>
+
+        {/* Mobile Fixed Bottom Navigation */}
+        <MobileBottomNav userRole={userRole} />
       </div>
     </div>
   );

@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo, useRef } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
-import { useForm, useFieldArray, Controller } from "react-hook-form";
+import { useForm, useFieldArray, Controller, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
 import QRCode from "react-qr-code";
@@ -59,6 +59,7 @@ import { Separator } from "@/components/ui/separator";
 import { PlanLimitModal } from "@/components/subscription/PlanLimitModal";
 import { SubscriptionStatus } from "@/lib/subscription";
 import { HoldBillDialog } from "@/components/invoices/HoldBillDialog";
+import { InvoiceSuccessModal, InvoiceSuccessData } from "@/components/invoices/InvoiceSuccessModal";
 
 export interface CustomerOption {
   id: string;
@@ -115,6 +116,8 @@ export function InvoiceForm({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [saveAndPrint, setSaveAndPrint] = useState(true);
   const [showLimitModal, setShowLimitModal] = useState(false);
+  const [createdInvoiceData, setCreatedInvoiceData] = useState<InvoiceSuccessData | null>(null);
+  const [isSuccessModalOpen, setIsSuccessModalOpen] = useState(false);
 
   // Hold Bill State
   const [heldBillId, setHeldBillId] = useState<string | null>(resumeHoldId || null);
@@ -156,17 +159,20 @@ export function InvoiceForm({
   const [dynamicUpiId, setDynamicUpiId] = useState<string>(shopInfo?.upiId || "");
 
   useEffect(() => {
-    if (!shopInfo?.upiId) {
+    if (shopInfo?.upiId) {
+      setDynamicUpiId(shopInfo.upiId);
+    } else {
       fetch("/api/settings")
         .then((res) => res.json())
         .then((data) => {
           if (data?.setting?.upiId) {
             setDynamicUpiId(data.setting.upiId);
+          } else if (data?.tenant?.mobile) {
+            const m = data.tenant.mobile.replace(/\D/g, "").slice(-10);
+            if (m) setDynamicUpiId(`${m}@upi`);
           }
         })
         .catch(() => {});
-    } else {
-      setDynamicUpiId(shopInfo.upiId);
     }
   }, [shopInfo?.upiId]);
 
@@ -309,10 +315,10 @@ export function InvoiceForm({
     name: "items",
   });
 
-  const watchedItems = watch("items") || [];
-  const watchedDiscount = watch("discountAmount") || 0;
-  const watchedCustomerName = watch("customerName") || "";
-  const watchedCustomerMobile = watch("customerMobile") || "";
+  const watchedItems = useWatch({ control, name: "items" }) || [];
+  const watchedDiscount = useWatch({ control, name: "discountAmount" }) || 0;
+  const watchedCustomerName = useWatch({ control, name: "customerName" }) || "";
+  const watchedCustomerMobile = useWatch({ control, name: "customerMobile" }) || "";
 
   // Synchronize paymentMode in form state when toggle changes
   useEffect(() => {
@@ -362,7 +368,9 @@ export function InvoiceForm({
     let subtotal = 0;
     let totalTax = 0;
 
-    watchedItems.forEach((item) => {
+    const list = Array.isArray(watchedItems) ? watchedItems : [];
+    for (let i = 0; i < list.length; i++) {
+      const item = list[i];
       const q = Number(item?.qty) || 0;
       const p = Number(item?.price) || 0;
       const r = Number(item?.taxRate) || 0;
@@ -370,7 +378,7 @@ export function InvoiceForm({
       const lineTax = lineBase * (r / 100);
       subtotal += lineBase;
       totalTax += lineTax;
-    });
+    }
 
     const billDiscount = Math.min(Number(watchedDiscount) || 0, subtotal + totalTax);
     const grandTotal = Math.max(0, subtotal + totalTax - billDiscount);
@@ -556,14 +564,59 @@ export function InvoiceForm({
       fetch(`/api/hold-bills/${heldBillId}`, { method: "DELETE" }).catch(() => {});
     }
 
+    const successItem: InvoiceSuccessData = {
+      id: pending.id,
+      invoiceNo: tempInvoiceNo,
+      totalAmount: Number(payload.totalAmount),
+      paidAmount: Number(payload.paidAmount || 0),
+      balanceAmount: Number(payload.balanceAmount || 0),
+      paymentMode: payload.paymentMode,
+      customerName: payload.customerName,
+      customerMobile: payload.customerMobile,
+      isOffline: true,
+    };
+    setCreatedInvoiceData(successItem);
+    setIsSuccessModalOpen(true);
+
+    if (saveAndPrint) {
+      window.print();
+    }
     if (onSuccess) {
       onSuccess(mockSavedInvoice);
-    } else if (saveAndPrint) {
-      window.print();
-      router.push("/invoices");
-    } else {
-      router.push("/invoices");
     }
+  }
+
+  function handleNewBillReset() {
+    setIsSuccessModalOpen(false);
+    setCreatedInvoiceData(null);
+    setHeldBillId(null);
+    reset({
+      customerId: undefined,
+      customerName: "",
+      customerMobile: "",
+      customerAddress: "",
+      customerGstNo: "",
+      paymentMode: PaymentMode.CASH,
+      discountAmount: 0,
+      amountPaid: undefined,
+      items: [
+        {
+          productId: undefined,
+          name: "",
+          qty: 1,
+          price: 0,
+          taxRate: 0,
+          itemDiscount: 0,
+          discountType: "amount",
+        },
+      ],
+    });
+    setPaymentType("PAID");
+    setPaidSubMode("CASH");
+    setActiveDropdownIndex(null);
+    setTimeout(() => {
+      productIdInputRefs.current[0]?.focus();
+    }, 100);
   }
 
   // Form submit handler
@@ -596,7 +649,22 @@ export function InvoiceForm({
     setIsSubmitting(true);
 
     const isCredit = paymentType === "UDHARI";
-    const amountPaidFinal = isCredit ? 0 : totals.totalAmount;
+
+    // Accurately calculate line totals directly from validItems submitted by the form
+    let computedItemsSubtotal = 0;
+    let computedItemsTax = 0;
+    validItems.forEach((it) => {
+      const q = Number(it.qty) || 0;
+      const p = Number(it.price) || 0;
+      const r = Number(it.taxRate) || 0;
+      const base = q * p;
+      computedItemsSubtotal += base;
+      computedItemsTax += base * (r / 100);
+    });
+    const disc = Math.min(Number(data.discountAmount) || 0, computedItemsSubtotal + computedItemsTax);
+    const calculatedGrandTotal = Math.max(0, Math.round((computedItemsSubtotal + computedItemsTax - disc) * 100) / 100);
+    const amountPaidFinal = isCredit ? 0 : calculatedGrandTotal;
+
     const finalPaymentMode = isCredit
       ? PaymentMode.CREDIT
       : paidSubMode === "UPI"
@@ -672,16 +740,40 @@ export function InvoiceForm({
       if (typeof window !== "undefined") {
         window.dispatchEvent(new CustomEvent("products:updated"));
         window.dispatchEvent(new CustomEvent("billingsaas:bill-saved"));
+        try {
+          const channel = new BroadcastChannel("billingsaas_live_updates");
+          channel.postMessage({
+            type: "BILL_CREATED",
+            invoiceNo: result.invoice.invoiceNo,
+            timestamp: Date.now(),
+          });
+          channel.close();
+        } catch {}
+        try {
+          localStorage.setItem("billingsaas:last_bill_time", String(Date.now()));
+        } catch {}
       }
 
-      // Show success toast with WhatsApp instruction (NO auto-redirect to WhatsApp)
-      toast.success("Bill saved. Please share the PDF on WhatsApp.");
+      // Show success toast
+      toast.success(`Bill #${result.invoice.invoiceNo} saved successfully!`);
 
-      // Always open the Invoice Print / View page so the owner can see the bill
+      const successItem: InvoiceSuccessData = {
+        id: result.invoice.id,
+        invoiceNo: result.invoice.invoiceNo,
+        totalAmount: Number(result.invoice.totalAmount),
+        paidAmount: Number(result.invoice.paidAmount),
+        balanceAmount: Number(result.invoice.balanceAmount),
+        paymentMode: result.invoice.paymentMode,
+        customerName: data.customerName,
+        customerMobile: data.customerMobile,
+        isOffline: false,
+      };
+
+      setCreatedInvoiceData(successItem);
+      setIsSuccessModalOpen(true);
+
       if (saveAndPrint) {
-        router.push(`/invoices/${result.invoice.id}?print=true`);
-      } else {
-        router.push(`/invoices/${result.invoice.id}`);
+        window.open(`/invoices/${result.invoice.id}?print=true`, "_blank");
       }
 
       router.refresh();
@@ -702,7 +794,8 @@ export function InvoiceForm({
     : "";
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+    <>
+      <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
       {/* OFFLINE POS BANNER */}
       {isOffline && (
         <div className="flex items-center gap-3 p-3.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-700 text-xs font-medium">
@@ -833,12 +926,12 @@ export function InvoiceForm({
 
             {/* Items Table */}
             <div className="space-y-2.5">
-              <div className="hidden sm:grid grid-cols-12 gap-2 text-[11px] font-bold text-slate-500 uppercase px-1">
+              <div className="hidden sm:grid grid-cols-12 gap-2.5 text-[11px] font-bold text-slate-500 uppercase px-1 items-center">
                 <div className="col-span-1 text-center">#</div>
                 <div className="col-span-3">Search Product (ID / Name)</div>
-                <div className="col-span-3">Item Name (Read-only)</div>
-                <div className="col-span-1 text-center">Qty</div>
-                <div className="col-span-2 text-right">Price (₹) [Read-only]</div>
+                <div className="col-span-2">Item Name</div>
+                <div className="col-span-2 text-center">Qty</div>
+                <div className="col-span-2 text-right">Price (₹)</div>
                 <div className="col-span-2 text-right">Total (₹)</div>
               </div>
 
@@ -859,7 +952,7 @@ export function InvoiceForm({
                 return (
                   <div
                     key={field.id}
-                    className="p-3.5 sm:p-0 rounded-xl sm:rounded-none border sm:border-none border-slate-200 bg-white sm:bg-transparent shadow-xs sm:shadow-none space-y-2.5 sm:space-y-0 sm:grid sm:grid-cols-12 sm:gap-2 sm:items-center"
+                    className="p-3.5 sm:p-2 rounded-xl border border-slate-200 bg-white sm:bg-slate-50/50 hover:sm:bg-purple-50/20 transition-colors shadow-xs sm:shadow-none space-y-3 sm:space-y-0 sm:grid sm:grid-cols-12 sm:gap-2.5 sm:items-center"
                   >
                     {/* Mobile Header: Item Number & Remove button */}
                     <div className="flex sm:hidden items-center justify-between pb-1.5 border-b border-slate-100">
@@ -876,16 +969,16 @@ export function InvoiceForm({
                     </div>
 
                     {/* Desktop Index */}
-                    <div className="hidden sm:flex col-span-1 items-center justify-center text-xs font-bold text-slate-400">
+                    <div className="hidden sm:flex col-span-1 items-center justify-center text-xs font-bold text-slate-400 font-mono">
                       {index + 1}
                     </div>
 
                     {/* 1. Searchable Product ID / Name Input with Dropdown */}
-                    <div className="sm:col-span-3">
-                      <label className="sm:hidden text-[11px] font-semibold text-slate-600 block mb-1">
+                    <div className="sm:col-span-3 min-w-0">
+                      <label className="sm:hidden text-[11px] font-bold text-slate-600 block mb-1">
                         Product ID / Name
                       </label>
-                      <div className="relative">
+                      <div className="relative min-w-0">
                         <Input
                           ref={(el) => {
                             productIdInputRefs.current[index] = el;
@@ -906,9 +999,9 @@ export function InvoiceForm({
                             }, 200);
                           }}
                           onKeyDown={(e) => handleProductIdKeyDown(e, index)}
-                          className="h-9 text-xs font-mono font-semibold bg-white border-slate-300 focus-visible:ring-purple-500 w-full pr-7"
+                          className="h-10 text-xs sm:text-sm font-mono font-semibold bg-white border-slate-300 focus-visible:ring-2 focus-visible:ring-purple-500 w-full pr-8 rounded-lg shadow-2xs"
                         />
-                        <Search className="h-3.5 w-3.5 absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                        <Search className="h-4 w-4 absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
 
                         {/* Searchable Dropdown List */}
                         {activeDropdownIndex === index && (() => {
@@ -917,7 +1010,7 @@ export function InvoiceForm({
                           if (matches.length === 0) return null;
 
                           return (
-                            <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-2xl z-50 max-h-56 overflow-y-auto divide-y divide-slate-100">
+                            <div className="absolute left-0 right-0 top-full mt-1.5 bg-white border border-slate-200 rounded-xl shadow-2xl z-50 max-h-56 overflow-y-auto divide-y divide-slate-100">
                               <div className="px-2.5 py-1.5 bg-slate-50 text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center justify-between">
                                 <span>Matching Products ({matches.length})</span>
                                 <span className="text-[9px] font-normal lowercase">Click or press Enter</span>
@@ -956,25 +1049,25 @@ export function InvoiceForm({
                     </div>
 
                     {/* 2. Item Name (Read-only / Disabled once populated) */}
-                    <div className="sm:col-span-3">
-                      <label className="sm:hidden text-[11px] font-semibold text-slate-600 block mb-1">
+                    <div className="sm:col-span-2 min-w-0">
+                      <label className="sm:hidden text-[11px] font-bold text-slate-600 block mb-1">
                         Item Name (Read-only)
                       </label>
                       <Input
                         readOnly
                         disabled
                         value={itemName}
-                        placeholder="Auto-fills from Product ID"
-                        className="h-9 text-xs bg-slate-100 text-slate-700 font-medium border-slate-200 cursor-not-allowed w-full truncate select-none opacity-90"
+                        placeholder="Auto-fills from Product"
+                        className="h-10 text-xs sm:text-sm bg-slate-100/90 text-slate-700 font-medium border-slate-200 cursor-not-allowed w-full min-w-0 px-2.5 truncate select-none opacity-95 rounded-lg"
                         title={itemName}
                       />
                     </div>
 
                     {/* Mobile Subgrid: Qty, Price, Total */}
-                    <div className="grid grid-cols-3 gap-2 sm:contents">
+                    <div className="grid grid-cols-12 gap-2 sm:contents">
                       {/* 3. Qty (Enter key adds new row) */}
-                      <div className="sm:col-span-1">
-                        <label className="sm:hidden text-[11px] font-semibold text-slate-600 block mb-1">
+                      <div className="col-span-4 sm:col-span-2 min-w-0">
+                        <label className="sm:hidden text-[11px] font-bold text-slate-600 block mb-1">
                           Qty
                         </label>
                         <Input
@@ -988,42 +1081,46 @@ export function InvoiceForm({
                           step="any"
                           placeholder="1"
                           onKeyDown={(e) => handleQtyKeyDown(e, index)}
-                          className="h-9 text-xs text-center font-bold bg-white border-slate-300 w-full focus-visible:ring-purple-500"
+                          className="h-10 text-sm sm:text-base text-center font-black text-slate-900 bg-white border-slate-300 w-full min-w-0 px-1.5 sm:px-2 rounded-lg focus-visible:ring-2 focus-visible:ring-purple-500 shadow-2xs [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                         />
                       </div>
 
                       {/* 4. Price (Read-only / Disabled once product is selected) */}
-                      <div className="sm:col-span-2">
-                        <label className="sm:hidden text-[11px] font-semibold text-slate-600 block mb-1">
-                          Price (₹) [Read-only]
+                      <div className="col-span-4 sm:col-span-2 min-w-0">
+                        <label className="sm:hidden text-[11px] font-bold text-slate-600 block mb-1">
+                          Price (₹)
                         </label>
                         <Input
-                          type="number"
+                          type="text"
                           readOnly
                           disabled
-                          value={itemPrice !== 0 ? itemPrice : (watchedItems[index]?.price || "")}
+                          value={itemPrice > 0 ? itemPrice.toFixed(2) : ""}
                           placeholder="0.00"
-                          className="h-9 text-xs text-right font-mono font-bold bg-slate-100 text-slate-700 border-slate-200 cursor-not-allowed w-full select-none opacity-90"
+                          title={itemPrice > 0 ? `₹${itemPrice.toFixed(2)}` : "₹0.00"}
+                          className="h-10 text-xs sm:text-sm text-right font-mono font-bold bg-slate-100/90 text-slate-800 border-slate-200 cursor-not-allowed w-full min-w-0 px-2 sm:px-2.5 truncate select-none opacity-95 rounded-lg"
                         />
                       </div>
 
                       {/* 5. Total (Auto-calculated live: Qty × Price) */}
-                      <div className="sm:col-span-2">
-                        <label className="sm:hidden text-[11px] font-semibold text-slate-600 block mb-1">
+                      <div className="col-span-4 sm:col-span-2 min-w-0">
+                        <label className="sm:hidden text-[11px] font-bold text-purple-900 block mb-1">
                           Total (₹)
                         </label>
-                        <div className="h-9 flex items-center justify-between sm:justify-end gap-2 px-2.5 sm:px-0 bg-purple-50 sm:bg-transparent rounded-md border sm:border-none border-purple-100">
-                          <span className="text-xs font-bold font-mono text-purple-900">
+                        <div className="h-10 flex items-center justify-between sm:justify-end gap-1 px-2 sm:px-1.5 bg-purple-50 sm:bg-transparent rounded-lg border sm:border-none border-purple-100 min-w-0">
+                          <span
+                            className="text-xs sm:text-sm font-black font-mono text-purple-900 truncate text-right flex-1 min-w-0"
+                            title={`₹${lineTotal.toFixed(2)}`}
+                          >
                             ₹{lineTotal.toFixed(2)}
                           </span>
                           {fields.length > 1 && (
                             <button
                               type="button"
                               onClick={() => remove(index)}
-                              className="hidden sm:flex h-7 w-7 text-slate-400 hover:text-red-600 items-center justify-center transition rounded-lg hover:bg-red-50"
+                              className="hidden sm:flex h-8 w-8 text-slate-400 hover:text-red-600 items-center justify-center transition rounded-lg hover:bg-red-50 shrink-0"
                               title="Remove item"
                             >
-                              <Trash2 className="h-3.5 w-3.5" />
+                              <Trash2 className="h-4 w-4" />
                             </button>
                           )}
                         </div>
@@ -1216,23 +1313,26 @@ export function InvoiceForm({
               )}
 
               {/* Discount Input */}
-              <div className="flex items-center justify-between pt-1">
-                <span className="text-slate-600">Discount (₹):</span>
+              <div className="flex items-center justify-between gap-2 pt-1">
+                <span className="text-slate-600 font-medium">Discount (₹):</span>
                 <Input
                   type="number"
                   min="0"
                   step="0.01"
                   placeholder="0.00"
-                  className="h-8 w-24 text-right text-xs"
+                  className="h-8 w-28 text-right font-mono font-bold text-xs [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                   {...register("discountAmount")}
                 />
               </div>
 
               <Separator className="my-2" />
 
-              <div className="flex justify-between items-baseline pt-1">
-                <span className="font-bold text-slate-900 text-sm">Grand Total:</span>
-                <span className="text-2xl font-black text-slate-900 font-mono">
+              <div className="flex justify-between items-baseline gap-2 pt-1 min-w-0">
+                <span className="font-bold text-slate-900 text-sm shrink-0">Grand Total:</span>
+                <span
+                  className="text-2xl font-black text-slate-900 font-mono truncate text-right"
+                  title={`₹${totals.totalAmount.toFixed(2)}`}
+                >
                   ₹{totals.totalAmount.toFixed(2)}
                 </span>
               </div>
@@ -1379,6 +1479,17 @@ export function InvoiceForm({
         billLimit={subscription?.usage?.billLimit || 50}
         billsThisMonth={subscription?.usage?.billsThisMonth || 50}
       />
-    </form>
+
+      </form>
+
+      {/* Bill Created Success Modal with WhatsApp Sharing */}
+      <InvoiceSuccessModal
+        open={isSuccessModalOpen}
+        onOpenChange={setIsSuccessModalOpen}
+        invoice={createdInvoiceData}
+        shopName={shopName}
+        onNewBill={handleNewBillReset}
+      />
+    </>
   );
 }

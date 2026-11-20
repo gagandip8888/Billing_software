@@ -3,6 +3,7 @@
 import React, { useState, useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
 import {
   Search,
   Plus,
@@ -19,7 +20,11 @@ import {
   WifiOff,
   RefreshCw,
   RotateCcw,
+  X,
+  Filter,
+  Edit3,
 } from "lucide-react";
+import { format, subDays, startOfMonth } from "date-fns";
 import { toast } from "sonner";
 import { useOfflineSync } from "@/hooks/use-offline-sync";
 import { DeleteInvoiceDialog } from "@/components/invoices/DeleteInvoiceDialog";
@@ -98,17 +103,89 @@ export function InvoiceTable({
   userRole = "OWNER",
 }: InvoiceTableProps) {
   const router = useRouter();
-  const isCashier = userRole === "CASHIER";
+  const { data: session } = useSession();
+  const isCashier = userRole === "CASHIER" || (session?.user as any)?.role === "CASHIER";
   const [invoices, setInvoices] = useState<SerializedInvoice[]>(initialInvoices);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
+  const [startDate, setStartDate] = useState<string>("");
+  const [endDate, setEndDate] = useState<string>("");
+  const [datePreset, setDatePreset] = useState<string>("ALL");
   const [cancellingInvoice, setCancellingInvoice] =
     useState<SerializedInvoice | null>(null);
+  const [cancelPassword, setCancelPassword] = useState("");
   const [deletingInvoice, setDeletingInvoice] =
     useState<SerializedInvoice | null>(null);
   const [isCancelling, setIsCancelling] = useState(false);
   const [markingPaidId, setMarkingPaidId] = useState<string | null>(null);
   const { pendingCount, isSyncing, syncNow, isOnline } = useOfflineSync();
+
+  function applyDatePreset(preset: string) {
+    const now = new Date();
+    setDatePreset(preset);
+    if (preset === "ALL") {
+      setStartDate("");
+      setEndDate("");
+    } else if (preset === "TODAY") {
+      const todayStr = format(now, "yyyy-MM-dd");
+      setStartDate(todayStr);
+      setEndDate(todayStr);
+    } else if (preset === "YESTERDAY") {
+      const yestStr = format(subDays(now, 1), "yyyy-MM-dd");
+      setStartDate(yestStr);
+      setEndDate(yestStr);
+    } else if (preset === "LAST_7_DAYS") {
+      setStartDate(format(subDays(now, 6), "yyyy-MM-dd"));
+      setEndDate(format(now, "yyyy-MM-dd"));
+    } else if (preset === "THIS_MONTH") {
+      setStartDate(format(startOfMonth(now), "yyyy-MM-dd"));
+      setEndDate(format(now, "yyyy-MM-dd"));
+    }
+  }
+
+  function handleResetFilters() {
+    setSearchQuery("");
+    setStatusFilter("ALL");
+    setStartDate("");
+    setEndDate("");
+    setDatePreset("ALL");
+  }
+
+  const isFiltered =
+    Boolean(searchQuery.trim()) ||
+    statusFilter !== "ALL" ||
+    Boolean(startDate) ||
+    Boolean(endDate);
+
+  function getWhatsAppShareLink(inv: SerializedInvoice) {
+    const customerName =
+      inv.customer?.name ||
+      inv.metadata?.walkInCustomerName ||
+      "Customer";
+    const rawMobile =
+      inv.customer?.mobile ||
+      inv.metadata?.walkInCustomerMobile ||
+      "";
+    const digits = rawMobile.replace(/\D/g, "");
+    const cleanMobile = digits.length >= 10 ? `91${digits.slice(-10)}` : "";
+
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
+    const invoiceUrl = `${origin}/invoices/${inv.id}`;
+
+    const whatsappMessage = `Hi ${customerName}, here is your bill #${inv.invoiceNo} of ₹${Number(
+      inv.totalAmount
+    ).toFixed(2)} from ${businessName}.\n\nView / Download Bill: ${invoiceUrl}\n\nThank you for your business!`;
+
+    return cleanMobile
+      ? `https://wa.me/${cleanMobile}?text=${encodeURIComponent(whatsappMessage)}`
+      : `https://wa.me/?text=${encodeURIComponent(whatsappMessage)}`;
+  }
+
+  function handleShareWhatsApp(inv: SerializedInvoice) {
+    const url = getWhatsAppShareLink(inv);
+    window.open(url, "_blank", "noopener,noreferrer");
+    toast.success(`Opening WhatsApp for bill #${inv.invoiceNo}...`);
+  }
 
   async function handleMarkAsPaid(inv: SerializedInvoice) {
     setMarkingPaidId(inv.id);
@@ -148,14 +225,54 @@ export function InvoiceTable({
     setInvoices(initialInvoices);
   }, [initialInvoices]);
 
-  // Auto-refresh server list when an offline invoice completes sync
+  // Real-time synchronization across owner and employee devices/tabs
   React.useEffect(() => {
-    const handleSyncComplete = () => {
+    let channel: BroadcastChannel | null = null;
+    try {
+      channel = new BroadcastChannel("billingsaas_live_updates");
+      channel.onmessage = (msg) => {
+        if (
+          msg.data?.type === "BILL_CREATED" ||
+          msg.data?.type === "BILL_DELETED" ||
+          msg.data?.type === "SETTINGS_UPDATED"
+        ) {
+          router.refresh();
+        }
+      };
+    } catch {}
+
+    const handleCustomBillSaved = () => {
       router.refresh();
     };
-    window.addEventListener("billingsaas:sync-complete", handleSyncComplete);
+    window.addEventListener("billingsaas:bill-saved", handleCustomBillSaved);
+    window.addEventListener("billingsaas:sync-complete", handleCustomBillSaved);
+
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === "billingsaas:last_bill_time") {
+        router.refresh();
+      }
+    };
+    window.addEventListener("storage", handleStorage);
+
+    // Optimized 5-second polling so both employee and owner see new bills in real-time
+    const interval = setInterval(() => {
+      router.refresh();
+    }, 5000);
+
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        router.refresh();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+
     return () => {
-      window.removeEventListener("billingsaas:sync-complete", handleSyncComplete);
+      if (channel) channel.close();
+      window.removeEventListener("billingsaas:bill-saved", handleCustomBillSaved);
+      window.removeEventListener("billingsaas:sync-complete", handleCustomBillSaved);
+      window.removeEventListener("storage", handleStorage);
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", handleVisibility);
     };
   }, [router]);
 
@@ -167,11 +284,11 @@ export function InvoiceTable({
         const q = searchQuery.toLowerCase();
         const matchesNo = inv.invoiceNo.toLowerCase().includes(q);
         const matchesCust =
-          inv.customer?.name.toLowerCase().includes(q) ||
-          inv.customer?.mobile.toLowerCase().includes(q) ||
+          (inv.customer?.name || "").toLowerCase().includes(q) ||
+          (inv.customer?.mobile || "").toLowerCase().includes(q) ||
           (inv.metadata?.walkInCustomerName || "").toLowerCase().includes(q) ||
           (inv.metadata?.walkInCustomerMobile || "").toLowerCase().includes(q);
-        const matchesNotes = inv.notes?.toLowerCase().includes(q);
+        const matchesNotes = (inv.notes || "").toLowerCase().includes(q);
 
         if (!matchesNo && !matchesCust && !matchesNotes) {
           return false;
@@ -183,15 +300,46 @@ export function InvoiceTable({
         return false;
       }
 
+      // Date Range Filtering
+      if (startDate) {
+        const invDate = new Date(inv.invoiceDate);
+        const start = new Date(`${startDate}T00:00:00`);
+        if (invDate < start) return false;
+      }
+
+      if (endDate) {
+        const invDate = new Date(inv.invoiceDate);
+        const end = new Date(`${endDate}T23:59:59`);
+        if (invDate > end) return false;
+      }
+
       return true;
     });
-  }, [invoices, searchQuery, statusFilter]);
+  }, [invoices, searchQuery, statusFilter, startDate, endDate]);
+
+  const filteredTotalAmount = useMemo(() => {
+    return filteredInvoices.reduce((sum, inv) => sum + Number(inv.totalAmount || 0), 0);
+  }, [filteredInvoices]);
+
+  const filteredBalanceAmount = useMemo(() => {
+    return filteredInvoices.reduce((sum, inv) => sum + Number(inv.balanceAmount || 0), 0);
+  }, [filteredInvoices]);
 
   async function handleCancelInvoice(invoice: SerializedInvoice) {
+    if (isCashier && !cancelPassword.trim()) {
+      toast.error("Please enter the Store Owner Password to authorize cancellation.");
+      return;
+    }
+
     setIsCancelling(true);
     try {
       const res = await fetch(`/api/invoices/${invoice.id}`, {
         method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+          "x-delete-password": cancelPassword.trim(),
+        },
+        body: JSON.stringify({ password: cancelPassword.trim() }),
       });
 
       if (!res.ok) {
@@ -205,6 +353,7 @@ export function InvoiceTable({
           i.id === invoice.id ? { ...i, status: InvoiceStatus.CANCELLED } : i
         )
       );
+      setCancelPassword("");
       router.refresh();
     } catch (err: any) {
       toast.error(err.message || "An unexpected error occurred");
@@ -281,41 +430,177 @@ export function InvoiceTable({
         </div>
       )}
 
-      {/* FILTER & SEARCH BAR */}
-      <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-        <div className="flex flex-1 items-center gap-2.5">
-          <div className="relative flex-1 max-w-sm">
-            <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-            <Input
-              placeholder="Search invoice #, customer, mobile..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9 h-9 text-xs"
-            />
+      {/* ADVANCED FILTER & SEARCH BAR */}
+      <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm space-y-3">
+        {/* Top Controls: Search, Status, New Bill */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+          <div className="flex flex-1 flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+            <div className="relative flex-1 max-w-sm">
+              <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+              <Input
+                placeholder="Search bill #, customer name, mobile..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9 h-9 text-xs"
+              />
+            </div>
+
+            <div className="w-full sm:w-40">
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="h-9 text-xs">
+                  <SelectValue placeholder="All Status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ALL">All Invoices</SelectItem>
+                  <SelectItem value={InvoiceStatus.PAID}>Paid</SelectItem>
+                  <SelectItem value={InvoiceStatus.PARTIAL}>Partial</SelectItem>
+                  <SelectItem value={InvoiceStatus.UNPAID}>Unpaid / Khata</SelectItem>
+                  <SelectItem value={InvoiceStatus.CANCELLED}>Cancelled</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
-          <div className="w-36">
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="h-9 text-xs">
-                <SelectValue placeholder="All Status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="ALL">All Invoices</SelectItem>
-                <SelectItem value={InvoiceStatus.PAID}>Paid</SelectItem>
-                <SelectItem value={InvoiceStatus.PARTIAL}>Partial</SelectItem>
-                <SelectItem value={InvoiceStatus.UNPAID}>Unpaid / Khata</SelectItem>
-                <SelectItem value={InvoiceStatus.CANCELLED}>Cancelled</SelectItem>
-              </SelectContent>
-            </Select>
+          <div className="flex items-center gap-2 self-end sm:self-auto">
+            <Link href="/billing/new" prefetch={true}>
+              <Button className="h-9 text-xs font-semibold bg-purple-600 hover:bg-purple-700 text-white shadow-sm flex items-center gap-1.5">
+                <Plus className="h-3.5 w-3.5" /> + New Bill
+              </Button>
+            </Link>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <Link href="/billing/new">
-            <Button className="h-9 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white shadow-sm flex items-center gap-1.5">
-              <Plus className="h-3.5 w-3.5" /> + New Bill
-            </Button>
-          </Link>
+        {/* Date Range Filters & Quick Presets */}
+        <div className="pt-2 border-t border-slate-100 flex flex-col lg:flex-row lg:items-center justify-between gap-3 text-xs">
+          {/* Quick Date Presets */}
+          <div className="flex items-center gap-1 flex-wrap">
+            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mr-1">
+              Dates:
+            </span>
+            <button
+              type="button"
+              onClick={() => applyDatePreset("ALL")}
+              className={`px-2.5 py-1 rounded-md text-xs font-semibold transition ${
+                datePreset === "ALL" && !startDate && !endDate
+                  ? "bg-purple-100 text-purple-800 border border-purple-300 font-bold"
+                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+              }`}
+            >
+              All Time
+            </button>
+            <button
+              type="button"
+              onClick={() => applyDatePreset("TODAY")}
+              className={`px-2.5 py-1 rounded-md text-xs font-semibold transition ${
+                datePreset === "TODAY"
+                  ? "bg-purple-100 text-purple-800 border border-purple-300 font-bold"
+                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+              }`}
+            >
+              Today
+            </button>
+            <button
+              type="button"
+              onClick={() => applyDatePreset("YESTERDAY")}
+              className={`px-2.5 py-1 rounded-md text-xs font-semibold transition ${
+                datePreset === "YESTERDAY"
+                  ? "bg-purple-100 text-purple-800 border border-purple-300 font-bold"
+                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+              }`}
+            >
+              Yesterday
+            </button>
+            <button
+              type="button"
+              onClick={() => applyDatePreset("LAST_7_DAYS")}
+              className={`px-2.5 py-1 rounded-md text-xs font-semibold transition ${
+                datePreset === "LAST_7_DAYS"
+                  ? "bg-purple-100 text-purple-800 border border-purple-300 font-bold"
+                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+              }`}
+            >
+              Last 7 Days
+            </button>
+            <button
+              type="button"
+              onClick={() => applyDatePreset("THIS_MONTH")}
+              className={`px-2.5 py-1 rounded-md text-xs font-semibold transition ${
+                datePreset === "THIS_MONTH"
+                  ? "bg-purple-100 text-purple-800 border border-purple-300 font-bold"
+                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+              }`}
+            >
+              This Month
+            </button>
+          </div>
+
+          {/* Date Picker Inputs (From & To) + Clear Filter */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1">
+              <Calendar className="h-3.5 w-3.5 text-slate-400" />
+              <span className="text-[11px] text-slate-500 font-medium">From:</span>
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => {
+                  setStartDate(e.target.value);
+                  setDatePreset("CUSTOM");
+                }}
+                className="bg-transparent text-xs text-slate-800 font-medium focus:outline-none cursor-pointer"
+              />
+            </div>
+
+            <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1">
+              <Calendar className="h-3.5 w-3.5 text-slate-400" />
+              <span className="text-[11px] text-slate-500 font-medium">To:</span>
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => {
+                  setEndDate(e.target.value);
+                  setDatePreset("CUSTOM");
+                }}
+                className="bg-transparent text-xs text-slate-800 font-medium focus:outline-none cursor-pointer"
+              />
+            </div>
+
+            {isFiltered && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={handleResetFilters}
+                className="h-7 text-xs text-rose-600 hover:bg-rose-50 hover:text-rose-700 px-2 font-semibold gap-1"
+              >
+                <X className="h-3.5 w-3.5" />
+                Reset
+              </Button>
+            )}
+          </div>
+        </div>
+
+        {/* Live Filter Summary Bar */}
+        <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-slate-800">
+              Showing {filteredInvoices.length} of {invoices.length} {filteredInvoices.length === 1 ? "bill" : "bills"}
+            </span>
+            {isFiltered && (
+              <Badge variant="outline" className="text-[10px] bg-purple-50 text-purple-700 border-purple-200 font-bold">
+                Filtered View
+              </Badge>
+            )}
+          </div>
+
+          <div className="flex items-center gap-3 font-mono font-bold text-xs">
+            <span className="text-slate-700">
+              Filtered Total: <strong className="text-slate-900">₹{filteredTotalAmount.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</strong>
+            </span>
+            {filteredBalanceAmount > 0 && (
+              <span className="text-rose-600">
+                Due: ₹{filteredBalanceAmount.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
@@ -393,6 +678,7 @@ export function InvoiceTable({
                       <div className="flex flex-col gap-1 items-start">
                         <Link
                           href={`/invoices/${inv.id}`}
+                          prefetch={true}
                           className="hover:underline flex items-center gap-1"
                         >
                           {inv.invoiceNo}
@@ -452,6 +738,18 @@ export function InvoiceTable({
                     {/* Actions */}
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1.5">
+                        {/* Direct WhatsApp Share Action */}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleShareWhatsApp(inv)}
+                          title="Share bill on WhatsApp"
+                          className="h-7 px-2 text-[11px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-600 hover:text-white border-emerald-200 transition flex items-center gap-1 shrink-0"
+                        >
+                          <MessageCircle className="h-3.5 w-3.5" />
+                          <span className="hidden xl:inline">WhatsApp</span>
+                        </Button>
+
                         {inv.status !== InvoiceStatus.PAID &&
                           inv.status !== InvoiceStatus.CANCELLED && (
                             <Button
@@ -475,12 +773,20 @@ export function InvoiceTable({
                               <MoreVertical className="h-4 w-4" />
                             </Button>
                           </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-40">
+                        <DropdownMenuContent align="end" className="w-44">
                           <DropdownMenuItem asChild className="text-xs cursor-pointer">
-                            <Link href={`/invoices/${inv.id}`}>
+                            <Link href={`/invoices/${inv.id}`} prefetch={true}>
                               <Eye className="h-3.5 w-3.5 mr-2 text-slate-500" />
                               View Bill
                             </Link>
+                          </DropdownMenuItem>
+
+                          <DropdownMenuItem
+                            onClick={() => handleShareWhatsApp(inv)}
+                            className="text-xs text-emerald-700 focus:text-emerald-800 focus:bg-emerald-50 cursor-pointer font-semibold"
+                          >
+                            <MessageCircle className="h-3.5 w-3.5 mr-2 text-emerald-600" />
+                            Share on WhatsApp
                           </DropdownMenuItem>
 
                           <DropdownMenuItem asChild className="text-xs cursor-pointer">
@@ -494,27 +800,37 @@ export function InvoiceTable({
                             </a>
                           </DropdownMenuItem>
 
-                          {!isCashier && (
-                            <>
-                              <DropdownMenuSeparator />
-                              {inv.status !== InvoiceStatus.CANCELLED && (
-                                <DropdownMenuItem
-                                  onClick={() => setCancellingInvoice(inv)}
-                                  className="text-xs text-amber-700 focus:text-amber-800 focus:bg-amber-50 cursor-pointer"
-                                >
-                                  <Ban className="h-3.5 w-3.5 mr-2" />
-                                  Cancel Invoice
-                                </DropdownMenuItem>
-                              )}
-                              <DropdownMenuItem
-                                onClick={() => setDeletingInvoice(inv)}
-                                className="text-xs text-red-600 focus:text-red-700 focus:bg-red-50 cursor-pointer font-medium"
-                              >
-                                <Trash2 className="h-3.5 w-3.5 mr-2" />
-                                Delete Permanently
-                              </DropdownMenuItem>
-                            </>
+                          {inv.status !== InvoiceStatus.CANCELLED && (
+                            <DropdownMenuItem asChild className="text-xs cursor-pointer">
+                              <Link href={`/invoices/${inv.id}/edit`} prefetch={true}>
+                                <Edit3 className="h-3.5 w-3.5 mr-2 text-slate-500" />
+                                Edit Bill
+                                {isCashier && <span className="ml-auto text-[10px] text-slate-400">🔒</span>}
+                              </Link>
+                            </DropdownMenuItem>
                           )}
+
+                          <DropdownMenuSeparator />
+
+                          {inv.status !== InvoiceStatus.CANCELLED && (
+                            <DropdownMenuItem
+                              onClick={() => setCancellingInvoice(inv)}
+                              className="text-xs text-amber-700 focus:text-amber-800 focus:bg-amber-50 cursor-pointer"
+                            >
+                              <Ban className="h-3.5 w-3.5 mr-2" />
+                              Cancel Invoice
+                              {isCashier && <span className="ml-auto text-[10px] text-slate-400">🔒</span>}
+                            </DropdownMenuItem>
+                          )}
+
+                          <DropdownMenuItem
+                            onClick={() => setDeletingInvoice(inv)}
+                            className="text-xs text-red-600 focus:text-red-700 focus:bg-red-50 cursor-pointer font-medium"
+                          >
+                            <Trash2 className="h-3.5 w-3.5 mr-2" />
+                            Delete Permanently
+                            {isCashier && <span className="ml-auto text-[10px] text-slate-400">🔒</span>}
+                          </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </div>
@@ -530,24 +846,60 @@ export function InvoiceTable({
       {/* CANCEL CONFIRMATION DIALOG */}
       <AlertDialog
         open={Boolean(cancellingInvoice)}
-        onOpenChange={(open) => !open && setCancellingInvoice(null)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setCancellingInvoice(null);
+            setCancelPassword("");
+          }
+        }}
       >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle className="text-base font-bold text-slate-900">
               Cancel Invoice #{cancellingInvoice?.invoiceNo}
             </AlertDialogTitle>
-            <AlertDialogDescription className="text-xs text-slate-500">
-              Are you sure you want to cancel this invoice? This will mark the bill as
-              CANCELLED and restore product inventory quantities where applicable.
+            <AlertDialogDescription className="text-xs text-slate-500 space-y-2">
+              <span>
+                Are you sure you want to cancel this invoice? This will mark the bill as
+                CANCELLED and restore product inventory quantities where applicable.
+              </span>
+              {isCashier && (
+                <span className="block p-2 bg-amber-50 border border-amber-200 rounded text-amber-800 text-[11px] font-medium">
+                  🔒 Owner Authorization Required: Enter the Store Owner password below to confirm.
+                </span>
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
+
+          {isCashier && (
+            <div className="py-2 space-y-1.5">
+              <label className="text-xs font-semibold text-slate-700">
+                Store Owner Password:
+              </label>
+              <Input
+                type="password"
+                value={cancelPassword}
+                onChange={(e) => setCancelPassword(e.target.value)}
+                placeholder="Enter owner password..."
+                className="h-9 text-xs"
+                autoFocus
+              />
+            </div>
+          )}
+
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={isCancelling} className="text-xs h-9">
+            <AlertDialogCancel
+              disabled={isCancelling}
+              onClick={() => {
+                setCancellingInvoice(null);
+                setCancelPassword("");
+              }}
+              className="text-xs h-9"
+            >
               Close
             </AlertDialogCancel>
             <AlertDialogAction
-              disabled={isCancelling}
+              disabled={isCancelling || (isCashier && !cancelPassword.trim())}
               onClick={() => cancellingInvoice && handleCancelInvoice(cancellingInvoice)}
               className="text-xs h-9 bg-red-600 hover:bg-red-700 text-white font-semibold"
             >

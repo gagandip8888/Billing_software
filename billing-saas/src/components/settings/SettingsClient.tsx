@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Store,
   CreditCard,
@@ -35,6 +36,7 @@ export interface StaffUserItem {
   name: string;
   mobile: string;
   email?: string | null;
+  employeeId?: string | null;
   role: string;
   isActive: boolean;
   lastLoginAt?: string | null;
@@ -61,21 +63,42 @@ export function SettingsClient({
   initialStaff = [],
 }: SettingsClientProps) {
   const [activeTab, setActiveTab] = useState<string>(initialTab);
+  const router = useRouter();
   const { language, setLanguage, t } = useLanguage();
+
+  // Current tenant state & editable profile fields
+  const [currentTenant, setCurrentTenant] = useState(tenant);
+  const [businessName, setBusinessName] = useState<string>(tenant?.businessName || "");
+  const [ownerName, setOwnerName] = useState<string>(tenant?.ownerName || "");
+  const [shopMobile, setShopMobile] = useState<string>(tenant?.mobile || "");
+  const [shopType, setShopType] = useState<string>(tenant?.shopType || "CUSTOM");
 
   // Payment settings state
   const [preferredApp, setPreferredApp] = useState<string>(
     setting?.preferredApp || "PhonePe"
   );
-  const [upiId, setUpiId] = useState<string>(setting?.upiId || "");
+  const cleanMobile = (shopMobile || tenant?.mobile || "").replace(/\D/g, "").slice(-10);
+  const defaultUpi = cleanMobile ? `${cleanMobile}@upi` : "";
+  const [upiId, setUpiId] = useState<string>(setting?.upiId || defaultUpi);
   const [bankName, setBankName] = useState<string>(setting?.bankName || "");
   const [isSavingPayment, setIsSavingPayment] = useState(false);
+
+  // Common quick UPI suggestions for Indian merchants
+  const upiSuggestions = cleanMobile
+    ? [
+        { label: "Bank UPI", value: `${cleanMobile}@upi` },
+        { label: "PhonePe", value: `${cleanMobile}@ybl` },
+        { label: "Paytm", value: `${cleanMobile}@paytm` },
+        { label: "Google Pay", value: `${cleanMobile}@okaxis` },
+      ]
+    : [];
 
   // Staff management state (Task 1)
   const [staffList, setStaffList] = useState<StaffUserItem[]>(initialStaff);
   const [staffName, setStaffName] = useState("");
   const [staffMobile, setStaffMobile] = useState("");
   const [staffEmail, setStaffEmail] = useState("");
+  const [staffEmployeeId, setStaffEmployeeId] = useState("");
   const [staffPassword, setStaffPassword] = useState("");
   const [showStaffPassword, setShowStaffPassword] = useState(false);
   const [isSavingStaff, setIsSavingStaff] = useState(false);
@@ -131,6 +154,7 @@ export function SettingsClient({
           name: staffName.trim(),
           mobile: cleanMobile,
           email: staffEmail.trim() || undefined,
+          employeeId: staffEmployeeId.trim() || undefined,
           password: staffPassword,
         }),
       });
@@ -156,6 +180,7 @@ export function SettingsClient({
       setStaffName("");
       setStaffMobile("");
       setStaffEmail("");
+      setStaffEmployeeId("");
       setStaffPassword("");
     } catch (err: any) {
       toast.error(err.message || "Error creating employee account");
@@ -190,6 +215,10 @@ export function SettingsClient({
 
   async function handleSavePayment(e: React.FormEvent) {
     e.preventDefault();
+    if (!upiId.trim()) {
+      toast.error("Please enter a valid UPI ID (e.g. 9876543210@upi)");
+      return;
+    }
     setIsSavingPayment(true);
     try {
       const res = await fetch("/api/settings", {
@@ -202,12 +231,12 @@ export function SettingsClient({
         }),
       });
 
+      const data = await res.json();
       if (!res.ok) {
-        const data = await res.json();
         throw new Error(data.error || "Failed to save payment settings");
       }
 
-      toast.success("Payment & UPI settings saved successfully!");
+      toast.success("Payment & UPI settings saved! QR Code is ready.");
     } catch (err: any) {
       toast.error(err.message || "Failed to save settings");
     } finally {
@@ -234,26 +263,50 @@ export function SettingsClient({
 
   async function handleSaveProfile(e: React.FormEvent) {
     e.preventDefault();
+    if (!businessName.trim()) {
+      toast.error("Shop / Business Name is required");
+      return;
+    }
     setIsSavingProfile(true);
     try {
       const res = await fetch("/api/settings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          deletePassword: deletePassword.trim(),
+          businessName: businessName.trim(),
+          ownerName: ownerName.trim(),
+          mobile: shopMobile.trim(),
+          shopType,
           address: address.trim(),
           city: city.trim(),
           pincode: pincode.trim(),
           gstNo: gstNo.trim(),
+          upiId: upiId.trim(),
+          deletePassword: deletePassword.trim(),
         }),
       });
 
+      const data = await res.json();
       if (!res.ok) {
-        const data = await res.json();
         throw new Error(data.error || "Failed to update profile settings");
       }
 
-      toast.success("Shop Profile & Admin Delete Password updated!");
+      if (data.tenant) {
+        setCurrentTenant(data.tenant);
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(
+            new CustomEvent("shop-settings:updated", { detail: data.tenant })
+          );
+          try {
+            const channel = new BroadcastChannel("billingsaas_live_updates");
+            channel.postMessage({ type: "SETTINGS_UPDATED", tenant: data.tenant });
+            channel.close();
+          } catch {}
+        }
+      }
+
+      toast.success("Shop Profile & Details updated successfully!");
+      router.refresh();
     } catch (err: any) {
       toast.error(err.message || "Failed to save profile");
     } finally {
@@ -263,9 +316,9 @@ export function SettingsClient({
 
   return (
     <div className="flex flex-col lg:flex-row gap-6 items-start">
-      {/* Responsive Tabs (Vertical stack on mobile, sidebar on desktop) */}
-      <div className="w-full lg:w-64 bg-white rounded-xl border border-slate-200 p-2 sm:p-2.5 shadow-sm shrink-0">
-        <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-1 gap-1.5">
+      {/* Responsive Tabs: Horizontal scroll on mobile, sleek sidebar on desktop */}
+      <div className="w-full lg:w-64 bg-white rounded-xl border border-slate-200 p-1.5 sm:p-2.5 shadow-sm shrink-0">
+        <div className="flex overflow-x-auto scrollbar-none sm:grid sm:grid-cols-4 lg:grid-cols-1 gap-1.5 pb-1 sm:pb-0">
           {tabs.map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
@@ -274,7 +327,7 @@ export function SettingsClient({
                 key={tab.id}
                 type="button"
                 onClick={() => setActiveTab(tab.id)}
-                className={`w-full flex items-center justify-between px-3.5 py-2.5 text-xs sm:text-sm font-semibold rounded-lg transition ${
+                className={`whitespace-nowrap flex items-center justify-between px-3 py-2 sm:py-2.5 text-xs sm:text-sm font-semibold rounded-lg transition shrink-0 sm:shrink ${
                   isActive
                     ? "bg-purple-50 text-purple-700 font-bold border border-purple-200 shadow-2xs"
                     : "text-slate-600 hover:bg-slate-50 hover:text-slate-900 border border-transparent"
@@ -285,7 +338,7 @@ export function SettingsClient({
                   <span className="truncate">{tab.label}</span>
                 </div>
                 {tab.highlightBadge && (
-                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 shrink-0 ml-1.5">
+                  <span className="hidden sm:inline-block text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 shrink-0 ml-1.5">
                     {tab.highlightBadge}
                   </span>
                 )}
@@ -299,8 +352,8 @@ export function SettingsClient({
       <div className="flex-1 w-full min-w-0">
         {/* 1. PAYMENT SETTINGS */}
         {activeTab === "payment" && (
-          <div className="bg-white rounded-xl border border-slate-200 p-5 sm:p-6 shadow-sm space-y-6">
-            <div className="pb-3 border-b border-slate-200 flex items-center justify-between">
+          <div className="bg-white rounded-xl border border-slate-200 p-4 sm:p-6 shadow-sm space-y-6">
+            <div className="pb-3 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div>
                 <h2 className="text-base font-bold text-slate-900">
                   {t("paymentSettings", "Payment Settings")}
@@ -309,7 +362,7 @@ export function SettingsClient({
                   Configure store UPI ID and preferred payment app for instant POS QR billing.
                 </p>
               </div>
-              <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-purple-50 text-purple-700 border border-purple-200 flex items-center gap-1.5 shrink-0">
+              <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-purple-50 text-purple-700 border border-purple-200 flex items-center gap-1.5 self-start sm:self-auto shrink-0">
                 <Smartphone className="h-3.5 w-3.5" /> Instant Pay
               </span>
             </div>
@@ -338,18 +391,40 @@ export function SettingsClient({
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1.5 flex items-center justify-between">
                   <span>{t("upiId", "UPI ID")} <span className="text-red-500 font-bold">*</span></span>
-                  <span className="text-[11px] font-normal text-slate-400">e.g. 9876543210@ybl, store@okaxis</span>
+                  <span className="text-[11px] font-normal text-slate-400">e.g. 9876543210@upi, store@okaxis</span>
                 </label>
                 <input
                   type="text"
                   required
-                  placeholder="e.g. 9876543210@ybl or store@okaxis"
+                  placeholder="e.g. 9876543210@upi, 9876543210@ybl"
                   value={upiId}
                   onChange={(e) => setUpiId(e.target.value)}
                   className="w-full px-3 py-2 rounded-lg border border-slate-300 font-mono text-xs sm:text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-purple-500"
                 />
-                <p className="text-[11px] text-slate-500 mt-1">
-                  Used in Billing screen to generate instant live QR codes for customer scanning.
+
+                {/* Quick Auto-fill buttons */}
+                {upiSuggestions.length > 0 && (
+                  <div className="flex items-center gap-1.5 flex-wrap pt-2">
+                    <span className="text-[11px] text-slate-500 font-medium">Auto-fill UPI:</span>
+                    {upiSuggestions.map((s) => (
+                      <button
+                        key={s.value}
+                        type="button"
+                        onClick={() => setUpiId(s.value)}
+                        className={`px-2 py-0.5 rounded text-[11px] font-mono border transition ${
+                          upiId === s.value
+                            ? "bg-purple-100 text-purple-800 border-purple-300 font-bold"
+                            : "bg-slate-100 hover:bg-purple-50 text-slate-700 hover:text-purple-700 border-slate-200"
+                        }`}
+                      >
+                        {s.label}: {s.value}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                <p className="text-[11px] text-slate-500 mt-1.5">
+                  Used in Billing terminal to automatically generate live QR codes for customer scanning.
                 </p>
               </div>
 
@@ -366,23 +441,29 @@ export function SettingsClient({
                 />
               </div>
 
-              {upiId && (
-                <div className="p-4 rounded-xl bg-purple-50/60 border border-purple-200/80 flex items-center gap-4">
-                  <div className="p-2 bg-white rounded-lg border border-purple-100 shrink-0">
+              {upiId.trim() && (
+                <div className="p-4 rounded-xl bg-purple-50/70 border border-purple-200 flex flex-col sm:flex-row items-center gap-4 text-center sm:text-left">
+                  <div className="p-2.5 bg-white rounded-xl shadow-xs border border-purple-100 shrink-0">
                     <QRCode
-                      value={`upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(
-                        tenant.businessName || "Store"
+                      value={`upi://pay?pa=${encodeURIComponent(upiId.trim())}&pn=${encodeURIComponent(
+                        businessName || currentTenant?.businessName || "Store"
                       )}&cu=INR`}
-                      size={90}
+                      size={105}
                       level="M"
                     />
                   </div>
                   <div className="space-y-1 text-xs">
-                    <span className="font-bold text-purple-900 block">Live UPI QR Code Preview</span>
-                    <p className="text-slate-600 font-mono text-[11px]">UPI ID: {upiId}</p>
-                    <p className="text-slate-600">Payee: {tenant.businessName}</p>
-                    <p className="text-[11px] text-emerald-700 font-semibold">
-                      ✓ Ready for Billing terminal & receipts
+                    <span className="font-bold text-purple-900 block text-sm">
+                      Live UPI QR Code Preview
+                    </span>
+                    <p className="text-slate-700 font-mono text-xs">
+                      UPI ID: <strong className="text-purple-700">{upiId.trim()}</strong>
+                    </p>
+                    <p className="text-slate-600">
+                      Payee: <strong className="text-slate-800">{businessName || currentTenant?.businessName}</strong>
+                    </p>
+                    <p className="text-[11px] text-emerald-700 font-semibold flex items-center justify-center sm:justify-start gap-1 pt-0.5">
+                      <Check className="h-3.5 w-3.5" /> Ready &amp; linked to Billing counter &amp; receipts
                     </p>
                   </div>
                 </div>
@@ -500,6 +581,21 @@ export function SettingsClient({
                     <p className="text-[10px] text-slate-500 mt-0.5">Used as login username on /login</p>
                   </div>
 
+                  {/* Employee ID (Optional / Auto-generated) */}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Employee ID (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. EMP-101 (Auto-generated if empty)"
+                      value={staffEmployeeId}
+                      onChange={(e) => setStaffEmployeeId(e.target.value.toUpperCase())}
+                      className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white font-mono text-xs sm:text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-purple-500 uppercase"
+                    />
+                    <p className="text-[10px] text-slate-500 mt-0.5">Used for Employee Login tab</p>
+                  </div>
+
                   {/* Email */}
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 mb-1">
@@ -607,6 +703,11 @@ export function SettingsClient({
                               >
                                 {isOwner ? "Owner (Full Admin)" : "Cashier (Billing Only)"}
                               </span>
+                              {staff.employeeId && (
+                                <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200">
+                                  ID: {staff.employeeId}
+                                </span>
+                              )}
                             </div>
                             <p className="text-[11px] text-slate-500 mt-0.5 font-mono">
                               Mobile: <strong className="text-slate-700">{staff.mobile}</strong>
@@ -725,84 +826,153 @@ export function SettingsClient({
           </div>
         )}
 
-        {/* 3. SHOP PROFILE & SECURITY (With Delete Password & Address) */}
+        {/* 3. SHOP PROFILE & SECURITY (Editable Shop Name, Owner, Mobile, Type, Address & UPI) */}
         {activeTab === "profile" && (
-          <div className="bg-white rounded-xl border border-slate-200 p-5 sm:p-6 shadow-sm space-y-6">
-            <div className="pb-3 border-b border-slate-200 flex items-center justify-between">
+          <div className="bg-white rounded-xl border border-slate-200 p-4 sm:p-6 shadow-sm space-y-6">
+            <div className="pb-3 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div>
-                <h2 className="text-base font-bold text-slate-900">
-                  {t("shopProfile", "Shop Profile")} & Security
+                <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                  <Store className="h-4 w-4 text-purple-600" />
+                  <span>{t("shopProfile", "Shop Profile")} &amp; Details</span>
                 </h2>
                 <p className="text-xs text-slate-500">
-                  Manage store contact details, address for bills, and admin delete password.
+                  Edit shop name, proprietor name, contact mobile, business type, and billing address.
                 </p>
               </div>
-              <span className="text-xs font-normal text-slate-400">ID: {tenant.id}</span>
+              <span className="text-[11px] font-mono text-slate-400 bg-slate-50 border border-slate-200 px-2 py-0.5 rounded self-start sm:self-auto">
+                ID: {tenant.id}
+              </span>
             </div>
 
             <form onSubmit={handleSaveProfile} className="space-y-4 w-full max-w-2xl">
+              {/* 1. Shop / Business Name */}
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Shop / Business Name
+                <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center justify-between">
+                  <span>
+                    Shop / Business Name <span className="text-red-500 font-bold">*</span>
+                  </span>
+                  <span className="text-[11px] font-normal text-slate-400">
+                    Printed at the top of all invoices &amp; receipts
+                  </span>
                 </label>
                 <input
                   type="text"
-                  defaultValue={tenant.businessName}
-                  disabled
-                  className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-slate-50 text-xs sm:text-sm text-slate-700 cursor-not-allowed"
+                  required
+                  placeholder="e.g. Shree Ganesh Supermarket, Patil Electronics"
+                  value={businessName}
+                  onChange={(e) => setBusinessName(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-xs sm:text-sm font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-purple-500"
                 />
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Shop Type</label>
-                  <input
-                    type="text"
-                    defaultValue={tenant.shopType.replace(/_/g, " ")}
-                    disabled
-                    className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-slate-50 text-xs sm:text-sm text-slate-700 cursor-not-allowed uppercase"
-                  />
-                </div>
+              {/* 2. Owner Name & Registered Mobile */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Registered Mobile
+                    Owner / Proprietor Name <span className="text-red-500 font-bold">*</span>
                   </label>
                   <input
                     type="text"
-                    defaultValue={tenant.mobile}
-                    disabled
-                    className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-slate-50 text-xs sm:text-sm text-slate-700 cursor-not-allowed font-mono"
+                    required
+                    placeholder="e.g. Ramesh Patil"
+                    value={ownerName}
+                    onChange={(e) => setOwnerName(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-xs sm:text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center justify-between">
+                    <span>
+                      Contact / Login Mobile <span className="text-red-500 font-bold">*</span>
+                    </span>
+                    <span className="text-[10px] text-slate-400 font-mono">10 digits</span>
+                  </label>
+                  <input
+                    type="tel"
+                    required
+                    maxLength={10}
+                    placeholder="10-digit mobile, e.g. 9876543210"
+                    value={shopMobile}
+                    onChange={(e) => setShopMobile(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-xs sm:text-sm text-slate-800 font-mono focus:outline-none focus:ring-2 focus:ring-purple-500"
                   />
                 </div>
               </div>
 
-              {/* Editable Address for bills */}
+              {/* 3. Shop Type / Category */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Shop Category / Business Type
+                </label>
+                <select
+                  value={shopType}
+                  onChange={(e) => setShopType(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-xs sm:text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                >
+                  <option value="GROCERY">Grocery / Kirana Store</option>
+                  <option value="CLOTH_SHOP">Cloth / Garment Store</option>
+                  <option value="MOBILE_SHOP">Mobile &amp; Accessories Shop</option>
+                  <option value="ELECTRONICS">Electronics &amp; Appliances</option>
+                  <option value="HARDWARE">Hardware &amp; Tools</option>
+                  <option value="MEDICAL">Medical &amp; Pharmacy</option>
+                  <option value="RESTAURANT">Restaurant / Cafe</option>
+                  <option value="HOTEL">Hotel / Lodging</option>
+                  <option value="SALON">Salon / Men Grooming</option>
+                  <option value="BEAUTY_PARLOR">Beauty Parlor</option>
+                  <option value="SHOE_SHOP">Footwear / Shoe Shop</option>
+                  <option value="JEWELLERY">Jewellery Shop</option>
+                  <option value="STATIONERY">Stationery &amp; Books</option>
+                  <option value="TOYS_SHOP">Toys &amp; Gifts</option>
+                  <option value="FURNITURE">Furniture Showroom</option>
+                  <option value="PAINT_SHOP">Paint &amp; Chemical</option>
+                  <option value="OPTICAL">Optical / Eye Care</option>
+                  <option value="CYBER_CAFE">Cyber Cafe / Online Services</option>
+                  <option value="LAUNDRY">Laundry &amp; Dry Cleaning</option>
+                  <option value="TAILOR">Tailoring &amp; Boutique</option>
+                  <option value="REPAIR_SHOP">Repairing &amp; Service Center</option>
+                  <option value="CAR_WASH">Car Wash &amp; Detailing</option>
+                  <option value="PET_SHOP">Pet Food &amp; Accessories</option>
+                  <option value="FLOWER_SHOP">Flower &amp; Bouquet</option>
+                  <option value="TEA_STALL">Tea Stall &amp; Snacks</option>
+                  <option value="JUICE_CENTER">Juice &amp; Shake Center</option>
+                  <option value="SPA_MASSAGE">Spa &amp; Wellness</option>
+                  <option value="TATTOO_STUDIO">Tattoo Studio</option>
+                  <option value="EVENT_PHOTOGRAPHY">Event Photography</option>
+                  <option value="CATERING">Catering &amp; Events</option>
+                  <option value="PETROL_PUMP">Petrol Pump</option>
+                  <option value="CUSTOM">General Retail / Custom</option>
+                </select>
+              </div>
+
+              {/* 4. Editable Address for bills */}
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center gap-1.5">
-                  <MapPin className="h-3.5 w-3.5 text-purple-600" /> Shop Address (Printed on Bills)
+                  <MapPin className="h-3.5 w-3.5 text-purple-600" />
+                  <span>Shop Address (Printed on Invoices)</span>
                 </label>
                 <input
                   type="text"
-                  placeholder="e.g. Shop No. 4, MG Road, Near City Mall"
+                  placeholder="e.g. Shop No. 4, MG Road, Near Market Tower"
                   value={address}
                   onChange={(e) => setAddress(e.target.value)}
                   className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs sm:text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-purple-500"
                 />
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {/* 5. City and Pincode */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">City</label>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">City / Town</label>
                   <input
                     type="text"
-                    placeholder="e.g. Pune, Mumbai"
+                    placeholder="e.g. Pune, Mumbai, Nagpur"
                     value={city}
                     onChange={(e) => setCity(e.target.value)}
                     className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs sm:text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-purple-500"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Pincode</label>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Postal Pincode</label>
                   <input
                     type="text"
                     placeholder="e.g. 411001"
@@ -813,18 +983,69 @@ export function SettingsClient({
                 </div>
               </div>
 
+              {/* 6. GSTIN */}
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">GSTIN Number</label>
+                <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center justify-between">
+                  <span>GSTIN Number (Optional)</span>
+                  <span className="text-[11px] text-slate-400">Leave blank if unregistered</span>
+                </label>
                 <input
                   type="text"
-                  placeholder="e.g. 27AAAAA0000A1Z5 (Leave blank if unregistered)"
+                  placeholder="e.g. 27AAAAA0000A1Z5"
                   value={gstNo}
                   onChange={(e) => setGstNo(e.target.value)}
                   className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs sm:text-sm text-slate-800 font-mono uppercase focus:outline-none focus:ring-2 focus:ring-purple-500"
                 />
               </div>
 
-              {/* BILL DELETE PASSWORD */}
+              {/* 7. Store UPI ID Linked Here Too */}
+              <div className="p-4 rounded-xl bg-purple-50/50 border border-purple-200/80 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <QrCode className="h-4 w-4 text-purple-600" />
+                    <span className="text-xs font-bold text-slate-900">Linked Store UPI ID</span>
+                  </div>
+                  {upiId ? (
+                    <span className="text-[10px] bg-emerald-100 text-emerald-800 font-semibold px-2 py-0.5 rounded-full border border-emerald-200">
+                      QR Active
+                    </span>
+                  ) : (
+                    <span className="text-[10px] bg-amber-100 text-amber-800 font-semibold px-2 py-0.5 rounded-full border border-amber-200">
+                      Needs Setup
+                    </span>
+                  )}
+                </div>
+
+                <input
+                  type="text"
+                  placeholder="e.g. 9876543210@upi, store@okaxis"
+                  value={upiId}
+                  onChange={(e) => setUpiId(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white font-mono text-xs sm:text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                />
+
+                {upiSuggestions.length > 0 && (
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-[11px] text-slate-500 font-medium">Auto-fill:</span>
+                    {upiSuggestions.map((s) => (
+                      <button
+                        key={s.value}
+                        type="button"
+                        onClick={() => setUpiId(s.value)}
+                        className={`px-2 py-0.5 rounded text-[11px] font-mono border transition ${
+                          upiId === s.value
+                            ? "bg-purple-100 text-purple-800 border-purple-300 font-bold"
+                            : "bg-white hover:bg-purple-50 text-slate-700 hover:text-purple-700 border-slate-200"
+                        }`}
+                      >
+                        {s.label}: {s.value}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* 8. BILL DELETE PASSWORD */}
               <div className="p-4 rounded-xl bg-red-50/70 border border-red-200 space-y-2 mt-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2 text-red-900 font-bold text-xs sm:text-sm">
@@ -869,15 +1090,15 @@ export function SettingsClient({
               <Button
                 type="submit"
                 disabled={isSavingProfile}
-                className="bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs h-9 px-4 rounded-lg flex items-center gap-2 shadow-sm mt-3"
+                className="bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs h-10 px-5 rounded-lg flex items-center gap-2 shadow-sm mt-3"
               >
                 {isSavingProfile ? (
                   <>
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" /> {t("saving", "Saving...")}
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" /> {t("saving", "Saving Profile...")}
                   </>
                 ) : (
                   <>
-                    <Save className="h-3.5 w-3.5" /> {t("saveProfile", "Save Profile & Security")}
+                    <Save className="h-3.5 w-3.5" /> Save Shop Profile &amp; Details
                   </>
                 )}
               </Button>

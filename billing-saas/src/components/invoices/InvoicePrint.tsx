@@ -25,7 +25,7 @@ interface InvoicePrintProps {
 
 export function InvoicePrint({ invoice, tenant, autoPrint = false }: InvoicePrintProps) {
   const searchParams = useSearchParams();
-  const [printFormat, setPrintFormat] = useState<"THERMAL" | "A4">("THERMAL");
+  const [printFormat, setPrintFormat] = useState<"THERMAL_80" | "THERMAL_58" | "A4">("THERMAL_80");
   const [copied, setCopied] = useState(false);
   const [invoiceUrl, setInvoiceUrl] = useState(`/invoices/${invoice.id}`);
   const autoPrintRef = React.useRef(false);
@@ -137,8 +137,15 @@ export function InvoicePrint({ invoice, tenant, autoPrint = false }: InvoicePrin
   const billDiscount = Number(invoice.discountAmount || 0);
   const tax = Number(invoice.taxAmount || totalTaxCalculated);
   const grandTotal = Number(invoice.totalAmount || 0);
-  const paidAmount = Number(invoice.paidAmount ?? grandTotal);
-  const balanceAmount = Number(invoice.balanceAmount ?? Math.max(0, grandTotal - paidAmount));
+  const rawMode = invoice.paymentMode;
+  const isDirectPaidMode = rawMode === "CASH" || rawMode === "UPI" || rawMode === "CARD";
+
+  // If paymentMode is CASH, UPI, or CARD, bill is settled in full.
+  // Only genuine CREDIT (Udhari) bills or genuine partial payments have balance due.
+  const hasBalanceDue = rawMode === "CREDIT" || (!isDirectPaidMode && Number(invoice.balanceAmount) > 0);
+  const paidAmount = hasBalanceDue ? Number(invoice.paidAmount || 0) : grandTotal;
+  const balanceAmount = hasBalanceDue ? (Number(invoice.balanceAmount) > 0 ? Number(invoice.balanceAmount) : grandTotal) : 0;
+  const isPaid = !hasBalanceDue;
 
   // Total discount across line items and bill level
   const totalCombinedDiscount = Math.round((totalItemDiscount + billDiscount) * 100) / 100;
@@ -154,14 +161,7 @@ export function InvoicePrint({ invoice, tenant, autoPrint = false }: InvoicePrin
   }
 
   // Payment Mode resolution
-  const rawMode = invoice.paymentMode;
-  const hasBalanceDue = balanceAmount > 0;
-  const isPaid = balanceAmount <= 0;
-  const isUdhari =
-    hasBalanceDue &&
-    (rawMode === "CREDIT" ||
-      invoice.status === "UNPAID" ||
-      paidAmount === 0);
+  const isUdhari = hasBalanceDue;
 
   let displayPaymentMode = "Cash";
   if (isUdhari) {
@@ -202,15 +202,11 @@ export function InvoicePrint({ invoice, tenant, autoPrint = false }: InvoicePrin
   const cleanMobile = (customerMobile || "").replace(/\D/g, "");
   const mobile10 = cleanMobile.slice(-10);
 
-  const whatsappMessage = `Hi ${customerName}, your bill #${
+  const whatsappMessage = `Hi ${customerName}, here is your bill #${
     invoice.invoiceNo
   } of ₹${grandTotal.toFixed(
     2
-  )} from ${shopName} is ready.\nPayment Mode: ${displayPaymentMode}${
-    displayDiscount > 0 ? `\nDiscount: ₹${displayDiscount.toFixed(2)}` : ""
-  }${
-    hasBalanceDue ? `\nBalance Due: ₹${balanceAmount.toFixed(2)}` : "\nStatus: PAID"
-  }\nThank you! Visit again.\nView Bill: ${invoiceUrl}`;
+  )} from ${shopName}.\n\nView / Download Bill: ${invoiceUrl}\n\nThank you for your business!`;
 
   const whatsappHref = mobile10
     ? `https://wa.me/91${mobile10}?text=${encodeURIComponent(whatsappMessage)}`
@@ -231,7 +227,7 @@ export function InvoicePrint({ invoice, tenant, autoPrint = false }: InvoicePrin
       <style
         dangerouslySetInnerHTML={{
           __html:
-            printFormat === "THERMAL"
+            printFormat === "THERMAL_80"
               ? `
             @media print {
               @page {
@@ -258,6 +254,40 @@ export function InvoicePrint({ invoice, tenant, autoPrint = false }: InvoicePrin
                 border: none !important;
                 box-shadow: none !important;
                 font-size: 11px !important;
+              }
+              .a4-invoice-container {
+                display: none !important;
+              }
+            }
+          `
+              : printFormat === "THERMAL_58"
+              ? `
+            @media print {
+              @page {
+                size: 58mm auto;
+                margin: 0;
+              }
+              html, body {
+                width: 58mm !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                background: #ffffff !important;
+                color: #000000 !important;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace !important;
+              }
+              .print-hide, nav, header, aside, button, .action-bar {
+                display: none !important;
+              }
+              .thermal-receipt-container {
+                display: block !important;
+                width: 54mm !important;
+                max-width: 54mm !important;
+                margin: 0 auto !important;
+                padding: 2mm 1mm !important;
+                border: none !important;
+                box-shadow: none !important;
+                font-size: 9.5px !important;
+                line-height: 1.15 !important;
               }
               .a4-invoice-container {
                 display: none !important;
@@ -299,20 +329,20 @@ export function InvoicePrint({ invoice, tenant, autoPrint = false }: InvoicePrin
 
       {/* Top Controls / Action Bar (Hidden when printing) */}
       <div className="action-bar flex flex-wrap items-center justify-between gap-3 bg-white rounded-2xl border border-slate-200 p-3.5 shadow-sm print:hidden">
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2.5 flex-wrap">
           <Link href="/invoices">
             <Button variant="ghost" size="sm" className="h-9 text-xs text-slate-600 gap-1.5">
               <ArrowLeft className="h-4 w-4" /> Back to Invoices
             </Button>
           </Link>
 
-          {/* Format Toggle (Thermal 80mm vs A4) */}
-          <div className="flex rounded-xl border border-slate-200 p-1 bg-slate-50">
+          {/* Format Toggle (Thermal 80mm vs Thermal 58mm vs A4) */}
+          <div className="flex rounded-xl border border-slate-200 p-1 bg-slate-50 flex-wrap gap-1">
             <button
               type="button"
-              onClick={() => setPrintFormat("THERMAL")}
-              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 ${
-                printFormat === "THERMAL"
+              onClick={() => setPrintFormat("THERMAL_80")}
+              className={`px-2.5 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 ${
+                printFormat === "THERMAL_80"
                   ? "bg-white text-purple-700 shadow-sm"
                   : "text-slate-600 hover:text-slate-900"
               }`}
@@ -321,8 +351,19 @@ export function InvoicePrint({ invoice, tenant, autoPrint = false }: InvoicePrin
             </button>
             <button
               type="button"
+              onClick={() => setPrintFormat("THERMAL_58")}
+              className={`px-2.5 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 ${
+                printFormat === "THERMAL_58"
+                  ? "bg-white text-purple-700 shadow-sm"
+                  : "text-slate-600 hover:text-slate-900"
+              }`}
+            >
+              <Receipt className="h-3.5 w-3.5" /> Thermal (58mm)
+            </button>
+            <button
+              type="button"
               onClick={() => setPrintFormat("A4")}
-              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 ${
+              className={`px-2.5 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 ${
                 printFormat === "A4"
                   ? "bg-white text-purple-700 shadow-sm"
                   : "text-slate-600 hover:text-slate-900"
@@ -374,27 +415,50 @@ export function InvoicePrint({ invoice, tenant, autoPrint = false }: InvoicePrin
       </div>
 
       {/* ========================================================================= */}
-      {/* 1. 80MM THERMAL RECEIPT FORMAT (Hides internal DB ID & costPrice)         */}
+      {/* 1. THERMAL RECEIPT FORMAT (58mm and 80mm POS Printers)                     */}
       {/* ========================================================================= */}
-      {printFormat === "THERMAL" && (
-        <div className="thermal-receipt-container bg-white rounded-2xl border border-slate-300 p-5 shadow-md w-[80mm] max-w-full mx-auto text-[11px] font-mono leading-tight text-slate-900">
-          {/* SECTION 1: HEADER (Center) */}
+      {(printFormat === "THERMAL_80" || printFormat === "THERMAL_58") && (
+        <div
+          className={`thermal-receipt-container bg-white rounded-2xl border border-slate-300 p-4 shadow-md mx-auto font-mono leading-tight text-slate-900 ${
+            printFormat === "THERMAL_58"
+              ? "w-[58mm] max-w-[58mm] text-[9.5px]"
+              : "w-[80mm] max-w-[80mm] text-[11px]"
+          }`}
+        >
+          {/* SECTION 1: HEADER (Center Logo & Shop Details) */}
           <div className="text-center border-b border-dashed border-slate-400 pb-2.5 mb-2.5 space-y-0.5">
-            <div className="font-black text-sm uppercase tracking-tight text-slate-900">
+            {/* Shop Logo (if available) */}
+            {tenant?.logoUrl && (
+              <div className="flex justify-center pb-1">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={tenant.logoUrl}
+                  alt={shopName}
+                  className={
+                    printFormat === "THERMAL_58"
+                      ? "max-h-8 max-w-[90px] object-contain"
+                      : "max-h-12 max-w-[130px] object-contain"
+                  }
+                />
+              </div>
+            )}
+            <div className={`font-black uppercase tracking-tight text-slate-900 ${
+              printFormat === "THERMAL_58" ? "text-xs" : "text-sm"
+            }`}>
               {shopName}
             </div>
             {shopAddress && (
-              <div className="text-[10px] text-slate-700 leading-snug">
+              <div className="text-[9px] text-slate-700 leading-snug">
                 {shopAddress}
               </div>
             )}
             {shopMobile && (
-              <div className="text-[10px] text-slate-700">
+              <div className="text-[9px] text-slate-700">
                 Tel: {shopMobile}
               </div>
             )}
             {shopGstin && (
-              <div className="text-[10px] font-bold text-slate-900">
+              <div className="text-[9px] font-bold text-slate-900">
                 GSTIN: {shopGstin}
               </div>
             )}
@@ -514,15 +578,19 @@ export function InvoicePrint({ invoice, tenant, autoPrint = false }: InvoicePrin
             )}
           </div>
 
-          {/* SECTION 5: PAYMENT & FOOTER (QR code + Thank you + Sign) */}
+          {/* SECTION 5: PAYMENT & PROFESSIONAL FOOTER (QR code + Thank you + Shop Contact) */}
           <div className="space-y-2 pt-1 text-center">
-            {/* Small UPI QR Code */}
+            {/* Dynamic UPI QR Code */}
             {amountToCollect > 0 && upiId && (
               <div className="flex flex-col items-center justify-center p-2 rounded-lg bg-slate-50 border border-slate-200">
                 <div className="p-1.5 bg-white rounded border border-slate-300">
-                  <QRCode value={upiQrString} size={75} level="M" />
+                  <QRCode
+                    value={upiQrString}
+                    size={printFormat === "THERMAL_58" ? 62 : 75}
+                    level="M"
+                  />
                 </div>
-                <span className="text-[9px] font-bold text-slate-700 mt-1">
+                <span className="text-[9px] font-bold text-slate-800 mt-1">
                   Scan & Pay via UPI (₹{amountToCollect.toFixed(2)})
                 </span>
                 <span className="text-[8px] text-slate-500 font-mono">
@@ -531,13 +599,27 @@ export function InvoicePrint({ invoice, tenant, autoPrint = false }: InvoicePrin
               </div>
             )}
 
-            <div className="font-bold text-[10px] text-slate-800 pt-1">
-              Thank you! Visit Again.
+            {/* Thank You Note & Contact Info */}
+            <div className="pt-1.5 border-t border-dashed border-slate-400 space-y-0.5">
+              <div className="font-black text-[10px] text-slate-900 uppercase tracking-wider">
+                Thank you for your business!
+              </div>
+              <div className="text-[8.5px] text-slate-600">
+                Visit Again &bull; Contact: {shopMobile || tenant?.email || "Store"}
+              </div>
+              {shopAddress && (
+                <div className="text-[8px] text-slate-500 leading-tight">
+                  {shopAddress}
+                </div>
+              )}
             </div>
 
-            <div className="text-[9px] text-slate-500 text-right pt-2 border-t border-dotted border-slate-300">
-              For {shopName}
-              <div className="pt-4 text-[8px] text-slate-400">Authorized Signatory</div>
+            <div className="text-[8.5px] text-slate-500 flex justify-between items-end pt-2 border-t border-dotted border-slate-300">
+              <span className="text-[7.5px] text-slate-400">Computer Generated Receipt</span>
+              <div className="text-right">
+                <div className="font-semibold text-[8px]">For {shopName}</div>
+                <div className="pt-2 text-[7.5px] text-slate-400">Authorized Signatory</div>
+              </div>
             </div>
           </div>
         </div>

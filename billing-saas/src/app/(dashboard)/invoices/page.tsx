@@ -13,7 +13,7 @@ async function InvoicesContent() {
   const tenant = await requireTenant();
   const sessionUser = await getSessionUser();
 
-  // Fetch all invoices for tenant to calculate metrics
+  // Fetch recent invoices for tenant (optimized: omit heavy items table since InvoiceTable only needs invoice totals)
   const invoices = await prisma.invoice.findMany({
     where: {
       tenantId: tenant.id,
@@ -27,7 +27,6 @@ async function InvoicesContent() {
           email: true,
         },
       },
-      items: true,
       salesReturns: {
         select: {
           id: true,
@@ -39,7 +38,7 @@ async function InvoicesContent() {
     orderBy: {
       invoiceDate: "desc",
     },
-    take: 100,
+    take: 300,
   });
 
   const serializedInvoices = invoices.map(serializeInvoice);

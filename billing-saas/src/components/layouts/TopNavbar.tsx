@@ -74,6 +74,37 @@ export function TopNavbar({
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchContainerRef = useRef<HTMLDivElement>(null);
 
+  const [displayBusinessName, setDisplayBusinessName] = useState(businessName);
+
+  useEffect(() => {
+    setDisplayBusinessName(businessName);
+  }, [businessName]);
+
+  // Live synchronization of shop name across client events and BroadcastChannel
+  useEffect(() => {
+    const handleSettingsUpdated = (e: any) => {
+      if (e.detail?.businessName) {
+        setDisplayBusinessName(e.detail.businessName);
+      }
+    };
+    window.addEventListener("shop-settings:updated", handleSettingsUpdated);
+
+    let channel: BroadcastChannel | null = null;
+    try {
+      channel = new BroadcastChannel("billingsaas_live_updates");
+      channel.onmessage = (msg) => {
+        if (msg.data?.type === "SETTINGS_UPDATED" && msg.data?.tenant?.businessName) {
+          setDisplayBusinessName(msg.data.tenant.businessName);
+        }
+      };
+    } catch {}
+
+    return () => {
+      window.removeEventListener("shop-settings:updated", handleSettingsUpdated);
+      if (channel) channel.close();
+    };
+  }, []);
+
   // Low stock notification state (includes specific productId)
   const [lowStockItems, setLowStockItems] = useState<LowStockProductItem[]>([]);
   const [selectedRestockProduct, setSelectedRestockProduct] = useState<LowStockProductItem | null>(null);
@@ -122,8 +153,11 @@ export function TopNavbar({
     window.addEventListener("focus", handleRefresh);
     document.addEventListener("visibilitychange", handleRefresh);
 
-    // Auto-poll every 15 seconds to keep notification bell count completely real-time
-    const interval = setInterval(fetchLowStock, 15000);
+    // Periodic poll every 2 minutes to keep notification bell count real-time without slamming database
+    const interval = setInterval(fetchLowStock, 120000);
+
+    const handleOpenMobileMenu = () => setMobileMenuOpen(true);
+    window.addEventListener("billingsaas:open-mobile-menu", handleOpenMobileMenu);
 
     return () => {
       isMounted = false;
@@ -133,6 +167,7 @@ export function TopNavbar({
       window.removeEventListener("products:updated", handleRefresh);
       window.removeEventListener("focus", handleRefresh);
       document.removeEventListener("visibilitychange", handleRefresh);
+      window.removeEventListener("billingsaas:open-mobile-menu", handleOpenMobileMenu);
     };
   }, [pathname]);
 
@@ -234,7 +269,7 @@ export function TopNavbar({
             </div>
             <div className="min-w-0">
               <span className="font-bold text-sm block truncate max-w-[130px] sm:max-w-[200px] text-slate-900 group-hover:text-purple-700 transition">
-                {businessName}
+                {displayBusinessName}
               </span>
               <span className="text-[10px] text-slate-500 block capitalize leading-none">
                 {userRole === "CASHIER" ? "Staff Terminal" : shopType.toLowerCase()}
@@ -511,7 +546,7 @@ export function TopNavbar({
                     {userRole === "CASHIER" ? "Cashier" : "Owner"}
                   </span>
                 </div>
-                <p className="text-[10px] text-slate-500 truncate">{businessName}</p>
+                <p className="text-[10px] text-slate-500 truncate">{displayBusinessName}</p>
                 {userMobile && (
                   <p className="text-[10px] font-mono text-slate-400 mt-0.5">{userMobile}</p>
                 )}
@@ -568,6 +603,7 @@ export function TopNavbar({
               <div className="p-4 border-b border-slate-800 flex items-center justify-between">
                 <Link
                   href={userRole === "CASHIER" ? "/billing/new" : "/dashboard"}
+                  prefetch={true}
                   onClick={() => setMobileMenuOpen(false)}
                   className="flex items-center gap-3"
                 >
@@ -575,7 +611,7 @@ export function TopNavbar({
                     <Store className="h-5 w-5" />
                   </div>
                   <div className="min-w-0">
-                    <p className="font-bold text-sm text-white truncate max-w-[140px]">{businessName}</p>
+                    <p className="font-bold text-sm text-white truncate max-w-[140px]">{displayBusinessName}</p>
                     <span className="text-[10px] text-purple-300 capitalize">
                       {userRole === "CASHIER" ? "Cashier Terminal" : shopType.toLowerCase()}
                     </span>

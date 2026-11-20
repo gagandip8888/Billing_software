@@ -48,10 +48,22 @@ export async function GET(req: NextRequest) {
       ];
     }
 
-    // Execute queries sequentially to avoid connection contention on PgBouncer (connection_limit=1)
+    if (isLowStockOnly) {
+      where.stockQty = { lte: 25 };
+    }
+
+    const limitParam = searchParams.get("limit");
+    const take = limitParam
+      ? Math.min(100, Math.max(1, parseInt(limitParam, 10)))
+      : isLowStockOnly
+      ? 50
+      : undefined;
+
+    // Execute query with bounded limits for PgBouncer & memory efficiency
     let products = await prisma.product.findMany({
       where,
       orderBy: { createdAt: "desc" },
+      ...(take ? { take } : {}),
     });
 
     if (isLowStockOnly) {

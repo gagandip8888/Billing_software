@@ -76,16 +76,26 @@ export const apiRegisterSchema = z.object({
   gstNo: z.string().trim().optional().nullable(),
 });
 
-export const loginSchema = z.object({
-  mobile: z
-    .string()
-    .trim()
-    .regex(mobileRegex, "Enter a valid 10-digit Indian mobile number"),
-  password: z
-    .string()
-    .min(1, "Password is required"),
+export const loginSchema = z
+  .object({
+    identifier: z.string().trim().min(2, "Enter a valid Mobile number or Employee ID").optional(),
+    mobile: z.string().trim().optional(),
+    password: z.string().min(1, "Password is required"),
+  })
+  .refine((data) => Boolean(data.identifier || data.mobile), {
+    message: "Mobile number or Employee ID is required",
+    path: ["identifier"],
+  });
+
+export const staffCreateSchema = z.object({
+  name: z.string().trim().min(2, "Name must be at least 2 characters"),
+  mobile: z.string().trim().regex(mobileRegex, "Enter a valid 10-digit Indian mobile number"),
+  employeeId: z.string().trim().min(2, "Employee ID must be at least 2 characters").optional(),
+  email: z.string().trim().email("Invalid email").optional().or(z.literal("")),
+  password: z.string().min(4, "Password must be at least 4 characters"),
 });
 
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type ApiRegisterInput = z.infer<typeof apiRegisterSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
+export type StaffCreateInput = z.infer<typeof staffCreateSchema>;

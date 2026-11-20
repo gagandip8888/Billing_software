@@ -16,21 +16,36 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     Credentials({
       name: "credentials",
       credentials: {
+        identifier: { label: "Mobile or Employee ID", type: "text" },
         mobile: { label: "Mobile", type: "text" },
         password: { label: "Password", type: "password" },
       },
       async authorize(credentials) {
-        const parsed = loginSchema.safeParse(credentials);
-        if (!parsed.success) {
+        const rawIdentifier = ((credentials?.identifier as string) || (credentials?.mobile as string) || "").trim();
+        const password = (credentials?.password as string) || "";
+
+        if (!rawIdentifier || !password) {
           return null;
         }
 
-        const { mobile, password } = parsed.data;
+        const cleanMobile = rawIdentifier.replace(/\D/g, "");
 
-        // Find users matching mobile (handles owner or employee across tenants)
+        // Find users matching mobile, employeeId, or email
+        const whereOr: any[] = [
+          { employeeId: rawIdentifier },
+          { employeeId: rawIdentifier.toUpperCase() },
+          { email: rawIdentifier.toLowerCase() },
+        ];
+
+        if (cleanMobile.length >= 10) {
+          whereOr.push({ mobile: cleanMobile });
+        } else {
+          whereOr.push({ mobile: rawIdentifier });
+        }
+
         const users = await prisma.user.findMany({
           where: {
-            mobile: mobile.trim(),
+            OR: whereOr,
             isActive: true,
           },
           include: {
@@ -73,6 +88,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           name: user.name,
           email: user.email,
           mobile: user.mobile,
+          employeeId: user.employeeId,
           role: user.role,
           tenantId: user.tenantId,
           shopType: user.tenant.shopType,
@@ -90,6 +106,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         token.shopType = user.shopType;
         token.businessName = user.businessName;
         token.mobile = user.mobile;
+        token.employeeId = (user as any).employeeId;
       }
       return token;
     },
@@ -102,6 +119,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         session.user.shopType = token.shopType as ShopType;
         session.user.businessName = token.businessName as string;
         session.user.mobile = token.mobile as string;
+        session.user.employeeId = (token.employeeId as string) || null;
       }
       return session;
     },

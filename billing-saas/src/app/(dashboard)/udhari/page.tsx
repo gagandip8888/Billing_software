@@ -324,7 +324,7 @@ export default function UdhariPage() {
                     return (
                       <tr key={b.id} className="hover:bg-slate-50/70 transition">
                         <td className="py-3 px-4 font-mono font-bold text-blue-600">
-                          <Link href={`/invoices/${b.id}`} className="hover:underline">
+                          <Link href={`/invoices/${b.id}`} prefetch={true} className="hover:underline">
                             {b.invoiceNo}
                           </Link>
                         </td>
@@ -353,7 +353,7 @@ export default function UdhariPage() {
                         </td>
                         <td className="py-3 px-4 text-right">
                           <div className="flex items-center justify-end gap-1.5">
-                            <Link href={`/invoices/${b.id}`}>
+                            <Link href={`/invoices/${b.id}`} prefetch={true}>
                               <Button
                                 size="sm"
                                 variant="outline"
