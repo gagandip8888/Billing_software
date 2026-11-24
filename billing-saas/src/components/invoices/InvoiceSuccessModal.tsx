@@ -14,6 +14,8 @@ import {
   ExternalLink,
   Receipt,
   FileText,
+  Download,
+  Loader2,
 } from "lucide-react";
 import {
   Dialog,
@@ -25,6 +27,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
+import { shareInvoicePdfDirect, generateInvoicePDF } from "@/lib/generate-invoice-pdf";
 
 export interface InvoiceSuccessData {
   id: string;
@@ -35,6 +38,16 @@ export interface InvoiceSuccessData {
   paymentMode?: string;
   customerName?: string | null;
   customerMobile?: string | null;
+  subtotal?: number;
+  taxAmount?: number;
+  discountAmount?: number;
+  items?: Array<{
+    name: string;
+    qty: number;
+    price: number;
+    taxRate?: number;
+    total: number;
+  }>;
   isOffline?: boolean;
 }
 
@@ -57,6 +70,7 @@ export function InvoiceSuccessModal({
   const [copied, setCopied] = useState(false);
   const [invoiceUrl, setInvoiceUrl] = useState("");
   const [pdfUrl, setPdfUrl] = useState("");
+  const [isSharingPdf, setIsSharingPdf] = useState(false);
 
   useEffect(() => {
     if (typeof window !== "undefined" && invoice?.id) {
@@ -80,14 +94,84 @@ export function InvoiceSuccessModal({
     invoice.paymentMode === "CREDIT" ||
     (!isDirectPaidMode && Number(invoice.balanceAmount) > 0);
 
-  // Exact pre-filled WhatsApp message requested by user
-  const whatsappMessage = `Hi ${customerName}, here is your bill #${invoice.invoiceNo} of ₹${Number(
-    invoice.totalAmount
-  ).toFixed(2)} from ${shopName}.\n\nView / Download Bill: ${invoiceUrl || pdfUrl}\n\nThank you for your business!`;
+  async function handleShareWhatsApp() {
+    if (!invoice) return;
+    setIsSharingPdf(true);
+    try {
+      await shareInvoicePdfDirect(
+        {
+          invoiceNo: invoice.invoiceNo,
+          invoiceDate: new Date(),
+          shopName,
+          customerName,
+          customerMobile: invoice.customerMobile,
+          items:
+            invoice.items && invoice.items.length > 0
+              ? invoice.items
+              : [
+                  {
+                    name: "Sale Item",
+                    qty: 1,
+                    price: Number(invoice.totalAmount),
+                    total: Number(invoice.totalAmount),
+                  },
+                ],
+          subtotal: invoice.subtotal ?? Number(invoice.totalAmount),
+          taxAmount: invoice.taxAmount ?? 0,
+          discountAmount: invoice.discountAmount ?? 0,
+          totalAmount: Number(invoice.totalAmount),
+          paidAmount: Number(invoice.paidAmount ?? 0),
+          balanceAmount: Number(invoice.balanceAmount ?? 0),
+          paymentMode: invoice.paymentMode || "CASH",
+        },
+        {
+          onSuccess: () => {
+            toast.success("Opening WhatsApp with PDF bill...");
+          },
+        }
+      );
+    } catch (err: any) {
+      console.error(err);
+      toast.error("Failed to share PDF: " + err.message);
+    } finally {
+      setIsSharingPdf(false);
+    }
+  }
 
-  const whatsappHref = cleanMobile
-    ? `https://wa.me/${cleanMobile}?text=${encodeURIComponent(whatsappMessage)}`
-    : `https://wa.me/?text=${encodeURIComponent(whatsappMessage)}`;
+  function handleDownloadPdf() {
+    if (!invoice) return;
+    try {
+      const { download } = generateInvoicePDF({
+        invoiceNo: invoice.invoiceNo,
+        invoiceDate: new Date(),
+        shopName,
+        customerName,
+        customerMobile: invoice.customerMobile,
+        items:
+          invoice.items && invoice.items.length > 0
+            ? invoice.items
+            : [
+                {
+                  name: "Sale Item",
+                  qty: 1,
+                  price: Number(invoice.totalAmount),
+                  total: Number(invoice.totalAmount),
+                },
+              ],
+        subtotal: invoice.subtotal ?? Number(invoice.totalAmount),
+        taxAmount: invoice.taxAmount ?? 0,
+        discountAmount: invoice.discountAmount ?? 0,
+        totalAmount: Number(invoice.totalAmount),
+        paidAmount: Number(invoice.paidAmount ?? 0),
+        balanceAmount: Number(invoice.balanceAmount ?? 0),
+        paymentMode: invoice.paymentMode || "CASH",
+      });
+      download();
+      toast.success(`Downloaded Invoice-${invoice.invoiceNo}.pdf`);
+    } catch (err: any) {
+      toast.error("Download failed: " + err.message);
+    }
+  }
 
   function handleCopyLink() {
     const linkToCopy = invoiceUrl || pdfUrl;
@@ -163,19 +247,28 @@ export function InvoiceSuccessModal({
           )}
         </div>
 
-        {/* PRIMARY ACTION: WhatsApp Bill Sharing (Direct native link to avoid popup block) */}
+        {/* PRIMARY ACTION: WhatsApp Bill Sharing (Direct PDF attachment & download) */}
         <div className="space-y-2 pt-1">
-          <a
-            href={whatsappHref}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="w-full h-11 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm shadow-md shadow-emerald-600/20 rounded-xl flex items-center justify-center gap-2 transition select-none cursor-pointer"
+          <Button
+            type="button"
+            onClick={handleShareWhatsApp}
+            disabled={isSharingPdf}
+            className="w-full h-11 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm shadow-md shadow-emerald-600/20 rounded-xl flex items-center justify-center gap-2 transition cursor-pointer"
           >
-            <MessageCircle className="h-5 w-5 fill-current" />
-            <span>Share on WhatsApp</span>
-          </a>
+            {isSharingPdf ? (
+              <>
+                <Loader2 className="h-5 w-5 animate-spin" />
+                <span>Generating PDF...</span>
+              </>
+            ) : (
+              <>
+                <MessageCircle className="h-5 w-5 fill-current" />
+                <span>Share PDF on WhatsApp</span>
+              </>
+            )}
+          </Button>
 
-          {/* Quick Print & Copy Row */}
+          {/* Quick Print & Direct PDF Download Row */}
           <div className="grid grid-cols-2 gap-2">
             <a
               href={`/invoices/${invoice?.id}?print=true`}
@@ -190,20 +283,11 @@ export function InvoiceSuccessModal({
             <Button
               type="button"
               variant="outline"
-              onClick={handleCopyLink}
+              onClick={handleDownloadPdf}
               className="h-10 text-xs font-semibold border-slate-200 text-slate-700 hover:bg-slate-100 rounded-xl flex items-center justify-center gap-1.5"
             >
-              {copied ? (
-                <>
-                  <Check className="h-4 w-4 text-emerald-600" />
-                  <span>Copied!</span>
-                </>
-              ) : (
-                <>
-                  <Copy className="h-4 w-4 text-slate-500" />
-                  <span>Copy Link</span>
-                </>
-              )}
+              <Download className="h-4 w-4 text-slate-600" />
+              <span>Download PDF</span>
             </Button>
           </div>
         </div>

@@ -573,6 +573,16 @@ export function InvoiceForm({
       paymentMode: payload.paymentMode,
       customerName: payload.customerName,
       customerMobile: payload.customerMobile,
+      subtotal: totals.subtotal,
+      taxAmount: totals.taxAmount,
+      discountAmount: totals.discountAmount,
+      items: validItems.map((it) => ({
+        name: it.name,
+        qty: Number(it.qty) || 1,
+        price: Number(it.price) || 0,
+        taxRate: Number(it.taxRate) || 0,
+        total: (Number(it.qty) || 1) * (Number(it.price) || 0),
+      })),
       isOffline: true,
     };
     setCreatedInvoiceData(successItem);
@@ -766,6 +776,16 @@ export function InvoiceForm({
         paymentMode: result.invoice.paymentMode,
         customerName: data.customerName,
         customerMobile: data.customerMobile,
+        subtotal: totals.subtotal,
+        taxAmount: totals.taxAmount,
+        discountAmount: totals.discountAmount,
+        items: validItems.map((it) => ({
+          name: it.name,
+          qty: Number(it.qty) || 1,
+          price: Number(it.price) || 0,
+          taxRate: Number(it.taxRate) || 0,
+          total: (Number(it.qty) || 1) * (Number(it.price) || 0),
+        })),
         isOffline: false,
       };
 
@@ -1066,7 +1086,7 @@ export function InvoiceForm({
                     {/* Mobile Subgrid: Qty, Price, Total */}
                     <div className="grid grid-cols-12 gap-2 sm:contents">
                       {/* 3. Qty (Enter key adds new row) */}
-                      <div className="col-span-4 sm:col-span-2 min-w-0">
+                      <div className="col-span-3 sm:col-span-2 min-w-0">
                         <label className="sm:hidden text-[11px] font-bold text-slate-600 block mb-1">
                           Qty
                         </label>
@@ -1081,34 +1101,34 @@ export function InvoiceForm({
                           step="any"
                           placeholder="1"
                           onKeyDown={(e) => handleQtyKeyDown(e, index)}
-                          className="h-10 text-sm sm:text-base text-center font-black text-slate-900 bg-white border-slate-300 w-full min-w-0 px-1.5 sm:px-2 rounded-lg focus-visible:ring-2 focus-visible:ring-purple-500 shadow-2xs [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                          className="h-10 text-sm sm:text-base text-center font-black text-slate-900 bg-white border-slate-300 w-full min-w-0 px-1 rounded-lg focus-visible:ring-2 focus-visible:ring-purple-500 shadow-2xs [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                         />
                       </div>
 
                       {/* 4. Price (Read-only / Disabled once product is selected) */}
                       <div className="col-span-4 sm:col-span-2 min-w-0">
                         <label className="sm:hidden text-[11px] font-bold text-slate-600 block mb-1">
-                          Price (₹)
+                          Price
                         </label>
                         <Input
                           type="text"
                           readOnly
                           disabled
-                          value={itemPrice > 0 ? itemPrice.toFixed(2) : ""}
-                          placeholder="0.00"
+                          value={itemPrice > 0 ? `₹${itemPrice.toFixed(2)}` : "₹0.00"}
+                          placeholder="₹0.00"
                           title={itemPrice > 0 ? `₹${itemPrice.toFixed(2)}` : "₹0.00"}
-                          className="h-10 text-xs sm:text-sm text-right font-mono font-bold bg-slate-100/90 text-slate-800 border-slate-200 cursor-not-allowed w-full min-w-0 px-2 sm:px-2.5 truncate select-none opacity-95 rounded-lg"
+                          className="h-10 text-xs sm:text-sm text-right font-mono font-bold bg-slate-100/90 text-slate-900 border-slate-200 cursor-not-allowed w-full min-w-0 px-1.5 sm:px-2.5 whitespace-nowrap select-none opacity-95 rounded-lg"
                         />
                       </div>
 
                       {/* 5. Total (Auto-calculated live: Qty × Price) */}
-                      <div className="col-span-4 sm:col-span-2 min-w-0">
+                      <div className="col-span-5 sm:col-span-2 min-w-0">
                         <label className="sm:hidden text-[11px] font-bold text-purple-900 block mb-1">
-                          Total (₹)
+                          Total
                         </label>
-                        <div className="h-10 flex items-center justify-between sm:justify-end gap-1 px-2 sm:px-1.5 bg-purple-50 sm:bg-transparent rounded-lg border sm:border-none border-purple-100 min-w-0">
+                        <div className="h-10 flex items-center justify-between sm:justify-end gap-1 px-2 sm:px-1.5 bg-purple-50 sm:bg-transparent rounded-lg border sm:border-none border-purple-200 min-w-0">
                           <span
-                            className="text-xs sm:text-sm font-black font-mono text-purple-900 truncate text-right flex-1 min-w-0"
+                            className="text-xs sm:text-sm font-black font-mono text-purple-950 whitespace-nowrap text-right flex-1 min-w-0"
                             title={`₹${lineTotal.toFixed(2)}`}
                           >
                             ₹{lineTotal.toFixed(2)}
@@ -1330,7 +1350,7 @@ export function InvoiceForm({
               <div className="flex justify-between items-baseline gap-2 pt-1 min-w-0">
                 <span className="font-bold text-slate-900 text-sm shrink-0">Grand Total:</span>
                 <span
-                  className="text-2xl font-black text-slate-900 font-mono truncate text-right"
+                  className="text-xl sm:text-2xl font-black text-slate-900 font-mono whitespace-nowrap text-right"
                   title={`₹${totals.totalAmount.toFixed(2)}`}
                 >
                   ₹{totals.totalAmount.toFixed(2)}

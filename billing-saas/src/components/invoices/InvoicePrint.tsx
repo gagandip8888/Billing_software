@@ -12,10 +12,13 @@ import {
   MessageCircle,
   Check,
   Copy,
+  Download,
+  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { numberToWordsIndian } from "@/lib/invoice-utils";
+import { shareInvoicePdfDirect, generateInvoicePDF } from "@/lib/generate-invoice-pdf";
 
 interface InvoicePrintProps {
   invoice: any;
@@ -198,19 +201,96 @@ export function InvoicePrint({ invoice, tenant, autoPrint = false }: InvoicePrin
       )}&am=${encodeURIComponent(amountToCollect.toFixed(2))}&cu=INR`
     : "";
 
-  // WhatsApp Share URL
-  const cleanMobile = (customerMobile || "").replace(/\D/g, "");
-  const mobile10 = cleanMobile.slice(-10);
+  const [isSharingPdf, setIsSharingPdf] = useState(false);
 
-  const whatsappMessage = `Hi ${customerName}, here is your bill #${
-    invoice.invoiceNo
-  } of ₹${grandTotal.toFixed(
-    2
-  )} from ${shopName}.\n\nView / Download Bill: ${invoiceUrl}\n\nThank you for your business!`;
+  async function handleShareWhatsAppPdf() {
+    setIsSharingPdf(true);
+    try {
+      await shareInvoicePdfDirect(
+        {
+          invoiceNo: invoice.invoiceNo,
+          invoiceDate: invoice.invoiceDate || invoice.createdAt,
+          shopName,
+          shopAddress: tenant?.address,
+          shopCity: tenant?.city,
+          shopState: tenant?.state,
+          shopPincode: tenant?.pincode,
+          shopMobile: tenant?.mobile,
+          shopGst: tenant?.gstNo,
+          customerName,
+          customerMobile,
+          customerAddress,
+          customerGst,
+          items: processedItems.map((item: any) => ({
+            name: item.name,
+            qty: item.qty,
+            price: item.rate,
+            taxRate: Number(item.taxRate) || 0,
+            taxAmount: item.lineTax,
+            total: item.lineTotal,
+          })),
+          subtotal: displaySubtotal,
+          taxAmount: tax,
+          discountAmount: displayDiscount,
+          totalAmount: grandTotal,
+          paidAmount,
+          balanceAmount,
+          paymentMode: displayPaymentMode,
+          termsConditions: tenant?.settings?.termsConditions,
+        },
+        {
+          onSuccess: () => {
+            toast.success("Opening WhatsApp with PDF bill...");
+          },
+        }
+      );
+    } catch (err: any) {
+      console.error(err);
+      toast.error("Failed to share PDF: " + err.message);
+    } finally {
+      setIsSharingPdf(false);
+    }
+  }
 
-  const whatsappHref = mobile10
-    ? `https://wa.me/91${mobile10}?text=${encodeURIComponent(whatsappMessage)}`
-    : `https://wa.me/?text=${encodeURIComponent(whatsappMessage)}`;
+  function handleDownloadPdf() {
+    try {
+      const { download } = generateInvoicePDF({
+        invoiceNo: invoice.invoiceNo,
+        invoiceDate: invoice.invoiceDate || invoice.createdAt,
+        shopName,
+        shopAddress: tenant?.address,
+        shopCity: tenant?.city,
+        shopState: tenant?.state,
+        shopPincode: tenant?.pincode,
+        shopMobile: tenant?.mobile,
+        shopGst: tenant?.gstNo,
+        customerName,
+        customerMobile,
+        customerAddress,
+        customerGst,
+        items: processedItems.map((item: any) => ({
+          name: item.name,
+          qty: item.qty,
+          price: item.rate,
+          taxRate: Number(item.taxRate) || 0,
+          taxAmount: item.lineTax,
+          total: item.lineTotal,
+        })),
+        subtotal: displaySubtotal,
+        taxAmount: tax,
+        discountAmount: displayDiscount,
+        totalAmount: grandTotal,
+        paidAmount,
+        balanceAmount,
+        paymentMode: displayPaymentMode,
+        termsConditions: tenant?.settings?.termsConditions,
+      });
+      download();
+      toast.success(`Downloaded Invoice-${invoice.invoiceNo}.pdf`);
+    } catch (err: any) {
+      toast.error("Download failed: " + err.message);
+    }
+  }
 
   function handleCopy() {
     if (typeof navigator !== "undefined" && navigator.clipboard) {
@@ -374,33 +454,35 @@ export function InvoicePrint({ invoice, tenant, autoPrint = false }: InvoicePrin
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          {/* Share on WhatsApp Button */}
-          <a href={whatsappHref} target="_blank" rel="noopener noreferrer">
-            <Button
-              size="sm"
-              className="h-9 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm flex items-center gap-1.5 rounded-xl"
-            >
-              <MessageCircle className="h-4 w-4" /> Share on WhatsApp
-            </Button>
-          </a>
-
-          {/* Copy Link Button */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Share on WhatsApp Button (Direct PDF Attachment) */}
           <Button
-            variant="outline"
+            type="button"
+            onClick={handleShareWhatsAppPdf}
+            disabled={isSharingPdf}
             size="sm"
-            onClick={handleCopy}
-            className="h-9 text-xs font-semibold border-slate-200 text-slate-700 hover:bg-slate-50 rounded-xl flex items-center gap-1.5"
+            className="h-9 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm flex items-center gap-1.5 rounded-xl cursor-pointer"
           >
-            {copied ? (
+            {isSharingPdf ? (
               <>
-                <Check className="h-3.5 w-3.5 text-emerald-600" /> Copied
+                <Loader2 className="h-4 w-4 animate-spin" /> Sharing PDF...
               </>
             ) : (
               <>
-                <Copy className="h-3.5 w-3.5" /> Copy Link
+                <MessageCircle className="h-4 w-4" /> Share PDF on WhatsApp
               </>
             )}
+          </Button>
+
+          {/* Download PDF Button */}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={handleDownloadPdf}
+            className="h-9 text-xs font-semibold border-slate-200 text-slate-700 hover:bg-slate-50 rounded-xl flex items-center gap-1.5"
+          >
+            <Download className="h-3.5 w-3.5 text-slate-600" /> Download PDF
           </Button>
 
           {/* Print Now Button */}
@@ -723,15 +805,15 @@ export function InvoicePrint({ invoice, tenant, autoPrint = false }: InvoicePrin
           </div>
 
           {/* Items Table (# | Item Description | Qty | Rate | Amount) */}
-          <div className="overflow-hidden rounded-xl border border-slate-200">
-            <table className="w-full text-left text-xs border-collapse">
+          <div className="overflow-x-auto rounded-xl border border-slate-200">
+            <table className="w-full min-w-[460px] sm:min-w-0 text-left text-xs border-collapse">
               <thead>
                 <tr className="bg-slate-100/90 text-slate-700 border-b border-slate-200 font-bold">
                   <th className="py-2.5 px-3 w-10 text-center">#</th>
                   <th className="py-2.5 px-3">Item Description</th>
                   <th className="py-2.5 px-3 text-center w-20">Qty</th>
-                  <th className="py-2.5 px-3 text-right w-28">Rate (₹)</th>
-                  <th className="py-2.5 px-3 text-right w-32">Amount (₹)</th>
+                  <th className="py-2.5 px-3 text-right w-28 whitespace-nowrap">Rate (₹)</th>
+                  <th className="py-2.5 px-3 text-right w-32 whitespace-nowrap">Amount (₹)</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -754,8 +836,8 @@ export function InvoicePrint({ invoice, tenant, autoPrint = false }: InvoicePrin
                       )}
                     </td>
                     <td className="py-2 px-3 text-center font-medium">{item.qty}</td>
-                    <td className="py-2 px-3 text-right font-mono">₹{item.rate.toFixed(2)}</td>
-                    <td className="py-2 px-3 text-right font-mono font-bold text-slate-900">
+                    <td className="py-2 px-3 text-right font-mono font-medium whitespace-nowrap">₹{item.rate.toFixed(2)}</td>
+                    <td className="py-2 px-3 text-right font-mono font-bold text-slate-900 whitespace-nowrap">
                       ₹{item.lineTotal.toFixed(2)}
                     </td>
                   </tr>
